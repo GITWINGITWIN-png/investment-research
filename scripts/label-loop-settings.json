@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "settings เฉพาะงาน label ตอนกลางคืน — ส่งเข้าไปด้วย --settings จาก label-night.sh",
+    "แยกไฟล์ไว้ต่างหากด้วยเหตุผลสองข้อ:",
+    "1. .claude/settings.local.json ถูกระบบเขียนทับทุกครั้งที่ผู้ใช้กดอนุมัติคำสั่ง",
+    "   และการเขียนทับนั้นเคยทำ deny block หายไปทั้งก้อนมาแล้ว ไฟล์นี้ไม่ถูกแตะ",
+    "2. ข้อจำกัดในนี้ควรบังคับใช้เฉพาะตอนรันอัตโนมัติ ไม่ใช่ตอนทำงานปกติ",
+    "",
+    "allow เป็น Write เปล่า ๆ เพราะ CLI 2.1.179 ไม่ match กฎ Write(<path>)",
+    "ขอบเขต path จึงบังคับด้วย hook แทน (ดู guard-queue-write.sh)"
+  ],
+  "permissions": {
+    "allow": [
+      "Write",
+      "Bash(uv run finbg label prepare)",
+      "Bash(uv run finbg label ingest)"
+    ],
+    "deny": [
+      "Bash(cd *)",
+      "Bash(python3 *)",
+      "Bash(cat *)",
+      "Bash(rm *)",
+      "Bash(mv *)",
+      "Bash(cp *)",
+      "Bash(chmod *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(git *)",
+      "Bash(claude *)",
+      "Bash(crontab *)",
+      "Edit",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/you/investment-research/scripts/guard-queue-write.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

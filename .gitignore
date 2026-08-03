@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# ข้อมูลที่ระบบสร้าง/ดึงมา — ไม่เหมาะกับ git เพราะเป็น binary ที่โตทุกวัน
+#
+# ⚠️ สำคัญ: data/raw/ คือ **คลัง point-in-time ที่สร้างย้อนหลังไม่ได้**
+# ถ้าหายคือหายถาวร — ต้องมีระบบสำรองแยกต่างหาก (ดู README หัวข้อ "การสำรองข้อมูล")
+data/
+
