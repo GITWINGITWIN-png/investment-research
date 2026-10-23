@@ -29,7 +29,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
+from functools import lru_cache
 from typing import Any
 
 from ... import config
@@ -75,20 +77,58 @@ def normalize(
     }
 
 
+def _boundary(term: str) -> str:
+    """regex ที่จับ `term` แบบเป็นคำเต็ม โดยนับเฉพาะอักษร ASCII เป็น "ตัวติดกัน"
+
+    ## ทำไมไม่ใช้ `\\b`
+
+    `\\b` ของ Python นับอักษรจีน/ญี่ปุ่นเป็น word character ด้วย
+    พาดหัว "小心Amazon假平台..." จึงไม่มีขอบเขตคำรอบคำว่า Amazon → จับไม่ได้เลย
+    ซึ่งเป็นปัญหาใหญ่เพราะ GDELT ส่งข่าวหลายภาษามาให้เป็นปกติ
+
+    การนิยามขอบเขตด้วย `[A-Za-z0-9]` แทน แก้ทั้งสองด้านพร้อมกัน:
+      "Metal"          → Meta ตามด้วย 'l' ซึ่งเป็น ASCII → ไม่จับ ✅
+      "小心Amazon假"    → รอบข้างไม่ใช่ ASCII → จับได้ ✅
+      "Apple's"        → ตามด้วย ' ซึ่งไม่ใช่ ASCII alnum → จับได้ ✅
+    """
+    return rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])"
+
+
+@lru_cache(maxsize=1)
+def _ticker_patterns() -> list[tuple[re.Pattern[str], str]]:
+    """คอมไพล์ regex ครั้งเดียว — ฟังก์ชันนี้ถูกเรียกทุกบทความ (หลายร้อยชิ้น/วัน)
+
+    เดิมใช้ `if ticker in title` (substring ล้วน) ซึ่งทำให้ META จับคำว่า "Metal"
+    และ "metals" — พบข่าว "This Overlooked Metals Stock..." ถูกติด META จริงในคลัง
+    ยิ่งเพิ่ม ticker สั้น ๆ ยิ่งพัง เพราะ CAT/KO/GE/LIN เป็นคำปกติทั้งหมด
+    """
+    patterns: list[tuple[re.Pattern[str], str]] = []
+
+    for ticker in config.WATCHLIST:
+        # ตัวย่อที่เป็นคำปกติในภาษาอังกฤษ จับจากชื่อบริษัทอย่างเดียว
+        # ("CAT" ในข่าวอาจเป็นแมว, "KO" อาจเป็นน็อกเอาต์, "AMT" อาจเป็นภาษี)
+        # หมายเหตุ: แหล่งที่รู้ ticker แน่นอนอยู่แล้ว (เช่น SEC) ส่งมาทาง `existing`
+        # จึงไม่ได้รับผลจากข้อยกเว้นนี้
+        if ticker in config.AMBIGUOUS_SYMBOLS:
+            continue
+        patterns.append((re.compile(_boundary(ticker), re.IGNORECASE), ticker))
+
+    for name, ticker in config.COMPANY_ALIASES.items():
+        patterns.append((re.compile(_boundary(name), re.IGNORECASE), ticker))
+
+    return patterns
+
+
 def tag_tickers(title: str, existing: list[str] | None = None) -> list[str]:
     """หา ticker จากพาดหัว — ทำฝั่งเราเอง ไม่เปลืองโควตา API
 
     ใช้ทั้งชื่อย่อและชื่อบริษัท เพราะข่าวมักเขียน "Nvidia" ไม่ใช่ "NVDA"
+    ผลลัพธ์คือ `tickers` ที่ **ยืนยันแล้ว** ต่างจาก `tickers_hint` ที่แหล่งข่าวเดามาให้
     """
     found = set(existing or [])
-    upper = title.upper()
 
-    for ticker in config.WATCHLIST:
-        if ticker.upper() in upper:
-            found.add(ticker)
-
-    for name, ticker in config.COMPANY_ALIASES.items():
-        if name.upper() in upper:
+    for pattern, ticker in _ticker_patterns():
+        if pattern.search(title):
             found.add(ticker)
 
     return sorted(found)

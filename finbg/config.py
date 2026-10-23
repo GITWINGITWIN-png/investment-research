@@ -62,8 +62,44 @@ SECTORS: dict[str, str] = {
     "XLC": "Communication Services",
 }
 
-# หุ้นที่คุณสนใจเป็นพิเศษ — แก้ได้ตามใจ ไม่กระทบส่วนอื่น
-WATCHLIST: list[str] = ["NVDA", "MSFT", "AAPL", "GOOGL", "AMZN", "META", "TSLA", "AVGO"]
+# หุ้นตัวแทนของแต่ละ sector — โครงสร้างนี้ทำสองหน้าที่พร้อมกัน
+#   1. บอกว่าจะไปค้นข่าวของหุ้นตัวไหน
+#   2. เป็นแผนที่ข่าวรายตัว → sector เพื่อยุบเป็น cross-section ทีหลัง
+#
+# ทำไมต้องครบทั้ง 11 sector: งาน cross-sectional คือการ **จัดอันดับ** หลายตัว
+# ในวันเดียวกันแล้วซื้อกลุ่มบนขายกลุ่มล่าง ถ้ามีข่าวแค่ 3 sector อีก 8 ช่องว่าง
+# ก็จัดอันดับไม่ได้ — เดิมมีแค่ XLK/XLC/XLY จึงติดข้อจำกัดนี้
+#
+# และเหตุผลที่ต้องรีบ: ข่าวย้อนหลังเก็บไม่ได้ ทุกวันที่ยังไม่ครบ = ข้อมูลหายถาวร
+# ส่วนฝั่งราคา/factor ย้อนหลังได้ตลอด จึงไม่ต้องรีบเท่า
+SECTOR_MEMBERS: dict[str, list[str]] = {
+    "XLK": ["NVDA", "MSFT", "AAPL", "AVGO"],   # Technology
+    "XLC": ["GOOGL", "META"],                  # Communication Services
+    "XLY": ["AMZN", "TSLA"],                   # Consumer Discretionary
+    "XLF": ["JPM", "BAC"],                     # Financials
+    "XLE": ["XOM", "CVX"],                     # Energy
+    "XLV": ["JNJ", "UNH"],                     # Health Care
+    "XLI": ["CAT", "GE"],                      # Industrials
+    "XLP": ["PG", "KO"],                       # Consumer Staples
+    "XLU": ["NEE", "DUK"],                     # Utilities
+    "XLB": ["LIN", "SHW"],                     # Materials
+    "XLRE": ["PLD", "AMT"],                    # Real Estate
+}
+
+WATCHLIST: list[str] = sorted({t for members in SECTOR_MEMBERS.values() for t in members})
+
+# แผนที่ย้อนกลับ — ใช้ยุบข่าวรายตัวขึ้นไปเป็นระดับ sector
+TICKER_SECTOR: dict[str, str] = {
+    ticker: sector for sector, members in SECTOR_MEMBERS.items() for ticker in members
+}
+
+# ตัวย่อที่บังเอิญเป็นคำปกติในภาษาอังกฤษ — **ห้ามจับข่าวจากตัวย่อ**
+# ให้จับจากชื่อบริษัทใน COMPANY_ALIASES อย่างเดียว
+#   CAT = แมว · KO = น็อกเอาต์ · GE/LIN = ส่วนของคำอื่น · PG = เรตหนัง/PG&E
+#   AMT = alternative minimum tax (คำที่โผล่ในข่าวการเงินบ่อย) · NEE = née
+# ไม่ใส่ META เพราะขอบเขตคำแก้ปัญหา "Metal/Metaverse" ได้แล้ว
+# และในข่าวการเงิน คำว่า Meta เดี่ยว ๆ แทบจะหมายถึงบริษัทเสมอ
+AMBIGUOUS_SYMBOLS: set[str] = {"CAT", "KO", "GE", "LIN", "PG", "AMT", "NEE"}
 
 
 def all_tickers() -> list[str]:
@@ -117,17 +153,56 @@ NEWS_QUERIES: list[str] = [
 NEWS_SOURCES: list[str] = ["yahoo", "rss", "sec", "gdelt"]
 
 # ชื่อบริษัทที่ข่าวมักใช้แทน ticker — ใช้จับคู่ข่าวกับหุ้นจากพาดหัว
+# จับด้วยขอบเขตคำ (\b) ไม่ใช่ substring — ดู tag_tickers()
+# สำหรับ ticker ใน AMBIGUOUS_SYMBOLS นี่คือ**ทางเดียว**ที่จะจับข่าวได้
+# จึงต้องใส่ให้ครบทุกวิธีเขียนที่พบจริง (มี/ไม่มี &, มี/ไม่มียัติภังค์)
 COMPANY_ALIASES: dict[str, str] = {
+    # Technology
     "Nvidia": "NVDA",
     "Microsoft": "MSFT",
     "Apple": "AAPL",
+    "Broadcom": "AVGO",
+    # Communication Services
     "Google": "GOOGL",
     "Alphabet": "GOOGL",
-    "Amazon": "AMZN",
     "Meta": "META",
     "Facebook": "META",
+    # Consumer Discretionary
+    "Amazon": "AMZN",
     "Tesla": "TSLA",
-    "Broadcom": "AVGO",
+    # Financials
+    "JPMorgan": "JPM",
+    "JP Morgan": "JPM",
+    "Bank of America": "BAC",
+    # Energy
+    "Exxon": "XOM",
+    "ExxonMobil": "XOM",
+    "Exxon Mobil": "XOM",
+    "Chevron": "CVX",
+    # Health Care
+    "Johnson & Johnson": "JNJ",
+    "Johnson and Johnson": "JNJ",
+    "UnitedHealth": "UNH",
+    "United Health": "UNH",
+    # Industrials
+    "Caterpillar": "CAT",
+    "General Electric": "GE",
+    "GE Aerospace": "GE",
+    # Consumer Staples
+    "Procter & Gamble": "PG",
+    "Procter and Gamble": "PG",
+    "Coca-Cola": "KO",
+    "Coca Cola": "KO",
+    # Utilities
+    "NextEra": "NEE",
+    "Duke Energy": "DUK",
+    # Materials
+    "Linde": "LIN",
+    "Sherwin-Williams": "SHW",
+    "Sherwin Williams": "SHW",
+    # Real Estate
+    "Prologis": "PLD",
+    "American Tower": "AMT",
 }
 
 # --- RSS ---------------------------------------------------------------------
@@ -216,3 +291,15 @@ LABEL_EFFORT = "medium"
 # ข่าวดิบยังเก็บครบเหมือนเดิม — กรองเฉพาะชั้น label เท่านั้น
 LABEL_HIGH_SIGNAL_ONLY = True
 LABEL_PRIMARY_TYPES: set[str] = {"primary"}
+
+# โควตาต่อ (วันที่ข่าวออก, sector) — 11 sector + ถัง macro = สูงสุด ~72 ชิ้น/วัน
+#
+# แก้ปัญหาที่วัดได้จากคลังจริง: label 105 ใบแรก มี AMZN/MSFT/AAPL/META กิน 67 จาก 98 ครั้ง
+# ต่อให้เพิ่ม ticker ครบ 11 sector แล้ว ข่าว big tech ก็ยังมีมากกว่ากลุ่มอื่นหลายเท่า
+# ถ้าไม่กำหนดเพดาน คลังจะกลายเป็น "ข่าว big tech" ไม่ใช่ cross-section ของตลาด
+#
+# โมเดลจัดอันดับต้องการ **ความสมดุล** มากกว่าปริมาณ — 6 ชิ้นจาก 12 กลุ่ม
+# มีค่ากว่า 72 ชิ้นที่มาจาก 3 กลุ่ม ทั้งที่จำนวนเท่ากัน
+#
+# ตั้งเป็น 0 เพื่อปิดโควตา (กลับไปพฤติกรรมเดิม: label ทุกชิ้นที่ผ่านตัวกรอง)
+LABEL_SECTOR_QUOTA = 6

@@ -34,6 +34,7 @@ labels เก็บที่ `data/labels/` **ไม่ใช่ `data/derived/`
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -247,27 +248,77 @@ def is_high_signal(record: dict[str, Any]) -> bool:
     return bool(record.get("tickers"))
 
 
-def unlabeled_articles(
-    limit: int | None = None,
-    high_signal_only: bool | None = None,
-) -> list[dict[str, Any]]:
-    """ข่าวที่ยังไม่ได้ label เรียงจากเก่าไปใหม่
+_SOURCE_TYPE_RANK = {"primary": 0, "outlet": 1, "aggregator": 2}
 
-    เรียงจากเก่าก่อนโดยตั้งใจ: ข่าวเก่าที่ยังไม่ label กำลัง "เสื่อม" ลงเรื่อย ๆ
-    เพราะยิ่งทิ้งไว้นาน ยิ่งเสี่ยงว่าเราจะรู้ผลลัพธ์ไปแล้ว
+
+def sector_of(record: dict[str, Any]) -> str:
+    """sector ของข่าว — จาก ticker ที่ยืนยันแล้วตัวแรก
+
+    `tickers` ถูกเรียงไว้แล้วใน normalize() ผลจึงเหมือนเดิมทุกครั้งที่รัน
+    ข่าวที่พูดถึงหลาย sector จะถูกนับที่ sector แรกตามลำดับตัวอักษร ซึ่งเป็นการตัดสิน
+    ที่ไม่สมบูรณ์แต่คงเส้นคงวา — บันทึกไว้เป็นข้อจำกัดที่รู้ตัว
+
+    ข่าวที่ไม่ผูกหุ้นตัวไหน (Fed, ตัวเลขเศรษฐกิจ, SEC ของบริษัทนอก watchlist)
+    ไปอยู่ถัง "macro" ซึ่งมีโควตาของตัวเอง — กันไม่ให้ประกาศ Fed ท่วมจนเบียดข่าวหุ้น
     """
-    if high_signal_only is None:
-        high_signal_only = config.LABEL_HIGH_SIGNAL_ONLY
+    for ticker in record.get("tickers") or []:
+        sector = config.TICKER_SECTOR.get(ticker)
+        if sector:
+            return sector
+    return "macro"
 
-    done = labeled_urls()
-    pending: list[dict[str, Any]] = []
 
-    # คลังข่าวดิบเป็น "บันทึกการดึงข้อมูล" ไม่ใช่ตาราง unique — ตั้งใจให้เป็นแบบนั้น
-    # เพราะ PIT ห้ามเขียนทับ ทุกรอบที่ cron ดึงจึงได้ snapshot เต็มชุดพร้อม fetched_at ของตัวเอง
-    # ผลคือข่าวเดิมโผล่ซ้ำข้ามไฟล์ได้ตามปกติ → ผู้อ่านต้องกรองเอง ไม่ใช่ผู้เขียน
-    # เก็บตัวแรกที่เจอ (ไฟล์เรียงตามชื่อ = ตามเวลา) เพราะ fetched_at แรกสุด
-    # คือเวลาที่เรารู้เรื่องนี้จริง ๆ ซึ่งเป็นค่าที่ PIT ต้องการ
+def _label_priority(record: dict[str, Any]) -> tuple[int, str, str]:
+    """ลำดับความคุ้มค่าในการ label ภายในกลุ่มเดียวกัน
+
+    ตอนเลือกเรายัง **ไม่รู้ materiality** เพราะนั่นคือผลลัพธ์ของการ label เอง
+    จึงต้องใช้ตัวแทนที่รู้ได้ล่วงหน้า: เอกสารต้นทาง > สื่อ > สำนักข่าวรวม
+    แล้วค่อยเรียงตามเวลา และปิดท้ายด้วย url เพื่อให้ผลเหมือนเดิมทุกครั้งที่รัน
+    """
+    return (
+        _SOURCE_TYPE_RANK.get(record.get("source_type", ""), 9),
+        record.get("published_at", ""),
+        record.get("url", ""),
+    )
+
+
+def _quota_eligible(records: list[dict[str, Any]], quota: int) -> set[str]:
+    """url ที่ผ่านโควตา — สูงสุด `quota` ชิ้น ต่อ (วันที่ข่าวออก, sector)
+
+    ## ทำไมต้องเป็นเพดานถาวร ไม่ใช่แค่จัดลำดับ
+
+    ถ้าแค่จัดลำดับให้สมดุลในแต่ละ batch loop จะวนจน label ครบทุกชิ้นอยู่ดี
+    ผลคือ (ก) ค่าใช้จ่ายโตตามจำนวน ticker และ (ข) สัดส่วนกลับไปเอียงหา big tech
+    เหมือนเดิม เพราะข่าวกลุ่มนั้นมีมากกว่ากลุ่มอื่นหลายเท่าโดยธรรมชาติ
+
+    ## ทำไมต้องจัดอันดับรวมข่าวที่ label ไปแล้ว
+
+    ถ้าจัดอันดับเฉพาะข่าวที่ยังไม่ label เพดานจะขยายตัวเองทุกรอบ —
+    label ไป 6 ชิ้น อีก 6 ชิ้นถัดไปก็เลื่อนขึ้นมาอยู่ใน 6 อันดับแรกแทน ไม่มีวันจบ
+    """
+    buckets: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        day = (record.get("published_at") or "")[:10]
+        buckets[(day, sector_of(record))].append(record)
+
+    eligible: set[str] = set()
+    for group in buckets.values():
+        group.sort(key=_label_priority)
+        eligible.update(r["url"] for r in group[:quota])
+    return eligible
+
+
+def _candidates(high_signal_only: bool) -> list[dict[str, Any]]:
+    """ข่าวทั้งหมดที่ผ่านตัวกรอง — รวมที่ label ไปแล้ว (ต้องใช้ตอนจัดอันดับโควตา)
+
+    คลังข่าวดิบเป็น "บันทึกการดึงข้อมูล" ไม่ใช่ตาราง unique — ตั้งใจให้เป็นแบบนั้น
+    เพราะ PIT ห้ามเขียนทับ ทุกรอบที่ cron ดึงจึงได้ snapshot เต็มชุดพร้อม fetched_at ของตัวเอง
+    ผลคือข่าวเดิมโผล่ซ้ำข้ามไฟล์ได้ตามปกติ → ผู้อ่านต้องกรองเอง ไม่ใช่ผู้เขียน
+    เก็บตัวแรกที่เจอ (ไฟล์เรียงตามชื่อ = ตามเวลา) เพราะ fetched_at แรกสุด
+    คือเวลาที่เรารู้เรื่องนี้จริง ๆ ซึ่งเป็นค่าที่ PIT ต้องการ
+    """
     seen: set[str] = set()
+    out: list[dict[str, Any]] = []
 
     for path in sorted(config.RAW_NEWS.glob("*.jsonl")):
         with path.open(encoding="utf-8") as fh:
@@ -277,12 +328,12 @@ def unlabeled_articles(
                 except json.JSONDecodeError:
                     continue
                 url = record.get("url", "")
-                if not url or url in done or url in seen:
+                if not url or url in seen:
                     continue
                 seen.add(url)
                 if high_signal_only and not is_high_signal(record):
                     continue
-                pending.append({
+                out.append({
                     "url": url,
                     "title": record.get("title", ""),
                     "publisher": record.get("publisher", "") or record.get("domain", ""),
@@ -293,9 +344,37 @@ def unlabeled_articles(
                     "fetched_at": record.get("fetched_at", ""),
                     "source_file": path.name,
                 })
-                if limit and len(pending) >= limit:
-                    return pending
-    return pending
+    return out
+
+
+def unlabeled_articles(
+    limit: int | None = None,
+    high_signal_only: bool | None = None,
+    quota: int | None = None,
+) -> list[dict[str, Any]]:
+    """ข่าวที่ยังไม่ได้ label ผ่านโควตาต่อ sector แล้ว เรียงจากเก่าไปใหม่
+
+    เรียงจากเก่าก่อนโดยตั้งใจ: ข่าวเก่าที่ยังไม่ label กำลัง "เสื่อม" ลงเรื่อย ๆ
+    เพราะยิ่งทิ้งไว้นาน ยิ่งเสี่ยงว่าเราจะรู้ผลลัพธ์ไปแล้ว
+
+    `quota=0` = ปิดโควตา (label ทุกชิ้นที่ผ่านตัวกรอง) — พฤติกรรมเดิมก่อนเพิ่ม sector
+    """
+    if high_signal_only is None:
+        high_signal_only = config.LABEL_HIGH_SIGNAL_ONLY
+    if quota is None:
+        quota = config.LABEL_SECTOR_QUOTA
+
+    candidates = _candidates(high_signal_only)
+    eligible = _quota_eligible(candidates, quota) if quota else None
+
+    done = labeled_urls()
+    pending = [
+        record for record in candidates
+        if record["url"] not in done and (eligible is None or record["url"] in eligible)
+    ]
+    pending.sort(key=lambda r: (r.get("published_at", ""), r["url"]))
+
+    return pending[:limit] if limit else pending
 
 
 def prepare(batch_size: int = 40, high_signal_only: bool | None = None) -> dict[str, Any]:
