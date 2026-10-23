@@ -15,3 +15,12 @@ wheels/
 # ถ้าหายคือหายถาวร — ต้องมีระบบสำรองแยกต่างหาก (ดู README หัวข้อ "การสำรองข้อมูล")
 data/
 
+
+# ไฟล์ชั่วคราวของ XeLaTeX — สร้างใหม่ทุกครั้งที่คอมไพล์ docs/guide.tex
+docs/*.aux
+docs/*.log
+docs/*.toc
+docs/*.out
+docs/*.xdv
+docs/*.fls
+docs/*.fdb_latexmk
