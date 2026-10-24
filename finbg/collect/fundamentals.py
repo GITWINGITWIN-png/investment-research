@@ -340,13 +340,30 @@ def _ratio(numerator: float | None, denominator: float | None, positive_only: bo
     return numerator / denominator
 
 
-def summary(as_of: datetime | None = None, closes: dict[str, float] | None = None) -> dict[str, dict[str, Any]]:
+def facts_for(ticker: str, cik: str) -> pd.DataFrame:
+    """fact ของบริษัทใดก็ได้ (ไม่ต้องอยู่ใน watchlist) — ใช้ตอนสแกนทั้งตลาดแล้วต้องดูงบตัวที่ถูกเลือก
+
+    ไม่บันทึกลงคลัง (SEC เก็บย้อนหลังให้อยู่แล้ว) — คืนตารางรูปแบบเดียวกับ load_facts()
+    """
+    df = pd.DataFrame(_fetch_one(ticker, cik))
+    if df.empty:
+        return df
+    for column in ("start", "end", "filed"):
+        df[column] = pd.to_datetime(df[column], errors="coerce")
+    return (df.sort_values("filed")
+            .drop_duplicates(["ticker", "metric", "concept", "start", "end"], keep="last")
+            .reset_index(drop=True))
+
+
+def summary(as_of: datetime | None = None, closes: dict[str, float] | None = None,
+            facts: pd.DataFrame | None = None) -> dict[str, dict[str, Any]]:
     """ตัวเลขสำคัญต่อบริษัท ณ เวลา as_of — ที่แผนรายสัปดาห์และ brief ใช้
 
     ราคาที่ใช้คิด valuation คือ `close` (ไม่ใช่ adj_close) เพราะ EPS เป็นต่อหุ้นจริง
     ณ ตอนนั้น ส่วน adj_close ถูกปรับย้อนหลังด้วยเงินปันผล
+    `facts` = ส่งตารางมาเอง (เช่นจาก facts_for) แทนการอ่านคลัง
     """
-    facts = load_facts(as_of)
+    facts = load_facts(as_of) if facts is None else facts
     if facts.empty:
         return {}
     today = pd.Timestamp((as_of or storage.utc_now()).date())

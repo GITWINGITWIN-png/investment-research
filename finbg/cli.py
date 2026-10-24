@@ -24,6 +24,8 @@ from .pm import predictions as pm_predictions
 from .pm import runner as pm_runner
 from .pm import volatility as pm_volatility
 from .pm import watch as pm_watch
+from .scan import book as scan_book
+from .scan import runner as scan_runner
 from .brief import context as context_module
 from .brief import render as render_module
 from .collect import calendar as calendar_module
@@ -347,6 +349,47 @@ def cmd_volatility(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scan(args: argparse.Namespace) -> int:
+    """สแกนทั้งตลาดหาโอกาสที่คนมองข้าม (morning.sh เรียกทุกวัน — ข้ามเองถ้าสแกนวันนั้นแล้ว)"""
+    result = scan_runner.run(dry_run=args.dry_run, no_llm=args.no_llm, force=args.force)
+    if result.get("skipped"):
+        print(f"⏭️  {result['skipped']}")
+        return 0
+    print(f"🔭 วันทำการ {result['session']} · universe {result['universe']:,} ตัว · filing {result['sec_filings']:,} · "
+          f"เหตุการณ์ {result['events']} · คนในซื้อ {result['insider_buyers']} · งบ {result['earnings_reported']} "
+          f"→ ได้คะแนน {result['scored']} → เข้ารอบ {result['candidates']}")
+    if result.get("backfilled"):
+        print(f"   ดึงประวัติราคาเพิ่ม {result['backfilled']} ตัว")
+    for line in result.get("top", [])[:10]:
+        print(f"   · {line}")
+    if args.dry_run:
+        print("   (dry-run: ไม่เรียกโมเดล ไม่บันทึกลงพอร์ตไอเดีย)")
+        return 0
+    if result.get("picks") is not None:
+        print(f"   🔎 Sonnet เลือกให้ดำลึก: {', '.join(result['picks']) or 'ไม่มี'}")
+    print(f"   ✅ เข้าพอร์ตไอเดีย: {', '.join(result.get('booked') or []) or 'ไม่มี'} · "
+          f"กลุ่มควบคุม: {', '.join(result.get('control') or []) or '-'} · เทียบเท่า ${result.get('cost_usd', 0):.2f}")
+    for key in ("triage_error", "deepdive_error"):
+        if result.get(key):
+            print(f"   ⚠️  {key}: {result[key]}")
+    print(f"   📄 {result['page']}")
+    return 0
+
+
+def cmd_ideas(args: argparse.Namespace) -> int:
+    """ผลของพอร์ตไอเดียเทียบกลุ่มควบคุม"""
+    if args.action == "resolve":
+        print(scan_book.resolve())
+    board = scan_book.scoreboard()
+    for name, key in (("ไอเดียของ Claude", "ideas"), ("กลุ่มควบคุม", "control"), ("ผู้เข้ารอบทั้งหมด", "candidates")):
+        s = board[key]
+        print(f"{name:18} n={s['n']:4}  เฉลี่ย {s['mean_pct'] if s['mean_pct'] is not None else '—':>6}%  "
+              f"ชนะ {s['hit_pct'] if s['hit_pct'] is not None else '—'}%  t={s['t']}")
+    diff = board.get("ideas_minus_control")
+    print(f"Claude − สุ่ม: {diff if diff else 'ยังไม่พอคำนวณ'} · ยังถือ {board['open_ideas']} · {board['gate']}")
+    return 0
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """เฝ้าระวังหนึ่งรอบ — ปกติรันสัปดาห์ละครั้งก่อนออกแผน (--weekly)"""
     if args.weekly:
@@ -517,6 +560,16 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--no-replan", action="store_true", help="แจ้งเตือนอย่างเดียว ไม่เรียก LLM วางแผนใหม่")
     p_watch.add_argument("--weekly", action="store_true", help="รันเฉพาะเมื่อถึงรอบสัปดาห์ (ใช้ใน morning.sh)")
     p_watch.set_defaults(func=cmd_watch)
+
+    p_scan = sub.add_parser("scan", help="สแกนทั้งตลาดหาโอกาสที่คนมองข้าม (ทุกวัน)")
+    p_scan.add_argument("--dry-run", action="store_true", help="เก็บข้อมูล+ให้คะแนน แต่ไม่เรียกโมเดล ไม่บันทึกพอร์ต")
+    p_scan.add_argument("--no-llm", action="store_true", help="บันทึกผู้เข้ารอบ แต่ไม่เรียกโมเดล")
+    p_scan.add_argument("--force", action="store_true", help="สแกนซ้ำแม้สแกนวันนั้นไปแล้ว")
+    p_scan.set_defaults(func=cmd_scan)
+
+    p_ideas = sub.add_parser("ideas", help="ผลของพอร์ตไอเดียเทียบกลุ่มควบคุม")
+    p_ideas.add_argument("action", nargs="?", default="status", choices=["status", "resolve"])
+    p_ideas.set_defaults(func=cmd_ideas)
 
     p_vol = sub.add_parser("volatility", help="หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (ทุกวัน)")
     p_vol.add_argument("--dry-run", action="store_true", help="ดูว่าตัวไหนเข้าเกณฑ์ โดยไม่เรียก Claude")

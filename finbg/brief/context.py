@@ -308,6 +308,24 @@ def _pm_block() -> dict[str, Any]:
     return block
 
 
+def _opportunities_block() -> dict[str, Any]:
+    """ผลสแกนทั้งตลาดครั้งล่าสุด + ตารางผลจริงของพอร์ตไอเดียเทียบกลุ่มควบคุม"""
+    from ..scan import book as scan_book
+
+    ideas = [json.loads(l) for l in scan_book.IDEAS.read_text(encoding="utf-8").splitlines() if l.strip()] \
+        if scan_book.IDEAS.exists() else []
+    voided = scan_book.voided_runs()
+    ideas = [i for i in ideas if i["created_at"] not in voided]       # รอบที่ประกาศยกเลิกไม่แสดง
+    latest_run = max((i["created_at"] for i in ideas), default=None)
+    latest = [i for i in ideas if i["created_at"] == latest_run]
+    return {
+        "session": latest[0]["session"] if latest else None,
+        "ideas": [{k: i.get(k) for k in ("ticker", "decision", "idea_type", "confidence", "what_happened")}
+                  for i in latest],
+        "scoreboard": scan_book.scoreboard(),
+    }
+
+
 def _fundamentals_block() -> dict[str, Any]:
     """ตัวเลขงบล่าสุดต่อบริษัท (SEC XBRL) — ราคาที่ใช้คิด P/E คือราคาปิดล่าสุด"""
     closes = storage.price_matrix("close")
@@ -357,6 +375,7 @@ def build() -> dict[str, Any]:
         "fundamentals": _fundamentals_block(),
         "earnings_upcoming": calendar_module.upcoming(days=14),
         "pm": _pm_block(),
+        "opportunities": _opportunities_block(),
     }
 
     out_dir = config.DERIVED / "context"

@@ -374,6 +374,8 @@ def render(pack: dict[str, Any]) -> str:
     # --- Portfolio Manager: แผน + ผลงาน + แจ้งเตือน + คำทำนาย ---
     out.extend(["", "---", ""])
     out.extend(_pm_section(pack.get("pm") or {}))
+    out.extend(["", "---", ""])
+    out.extend(_opportunities_section(pack.get("opportunities") or {}))
     out.extend([
         "",
         "---",
@@ -418,6 +420,28 @@ def _pm_section(pm: dict[str, Any]) -> list[str]:
                      f"{card['avg_confidence_pct']}% · Brier {card['brier']} (ต่ำกว่า 0.25 = ดีกว่าเดาสุ่ม)")
     else:
         lines.append("*ยังไม่มีข้อที่ครบกำหนด*")
+    return lines
+
+
+def _opportunities_section(block: dict[str, Any]) -> list[str]:
+    lines = ["## 🔭 พอร์ตไอเดีย (สแกนทั้งตลาด)", ""]
+    if not block.get("session"):
+        return lines + ["*ยังไม่มีผลสแกน — รันเองได้ด้วย `uv run finbg scan`*"]
+    names = {"add_to_book": "✅ เข้าพอร์ต", "watch": "👀 จับตา", "pass": "⏭️ ผ่าน"}
+    lines.append(f"สแกนล่าสุด: **[[{block['session']}]]**")
+    lines.append("")
+    for idea in block.get("ideas") or []:
+        lines.append(f"- **{idea['ticker']}** {names.get(idea['decision'], idea['decision'])} · `{idea['idea_type']}` · "
+                     f"มั่นใจ {idea['confidence']}% — {str(idea.get('what_happened', ''))[:160]}")
+    board = block.get("scoreboard") or {}
+    ideas, control = board.get("ideas", {}), board.get("control", {})
+    if ideas.get("n"):
+        diff = board.get("ideas_minus_control")
+        lines += ["", f"ผลจริง: ไอเดีย {ideas['n']} ตัว เฉลี่ย {ideas['mean_pct']:+.2f}% เทียบ benchmark · "
+                      f"สุ่ม {control.get('n', 0)} ตัว {control.get('mean_pct') or 0:+.2f}%"
+                      + (f" · **Claude − สุ่ม {diff['diff_pct']:+.2f} จุด (t {diff['t']})**" if diff else "")]
+    else:
+        lines += ["", f"*ยังไม่มีไอเดียที่ครบ 20 วันทำการ — {board.get('gate', '')}* · ดู [[scoreboard]]"]
     return lines
 
 

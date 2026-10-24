@@ -247,6 +247,7 @@ SEC_8K_ITEMS: dict[str, tuple[str, str]] = {
     "1.01": ("ทำสัญญาสำคัญ", "info"),
     "1.02": ("ยกเลิกสัญญาสำคัญ", "high"),
     "1.03": ("ล้มละลาย/พิทักษ์ทรัพย์", "critical"),
+    "1.04": ("เหตุด้านความปลอดภัยเหมือง", "info"),
     "1.05": ("เหตุการณ์ไซเบอร์ร้ายแรง", "critical"),
     "2.01": ("ซื้อ/ขายกิจการเสร็จสิ้น", "high"),
     "2.02": ("ประกาศผลประกอบการ", "info"),
@@ -256,8 +257,10 @@ SEC_8K_ITEMS: dict[str, tuple[str, str]] = {
     "2.06": ("ด้อยค่าสินทรัพย์", "high"),
     "3.01": ("ถูกเตือนเรื่องเพิกถอนหุ้น", "critical"),
     "3.02": ("ขายหุ้นเพิ่มทุนแบบไม่จดทะเบียน", "info"),
+    "3.03": ("แก้สิทธิของผู้ถือหลักทรัพย์", "high"),
     "4.01": ("เปลี่ยนผู้สอบบัญชี", "high"),
     "4.02": ("งบเดิมเชื่อถือไม่ได้ (ต้องแก้ย้อนหลัง)", "critical"),
+    "5.01": ("เปลี่ยนผู้ควบคุมบริษัท", "high"),
     "5.02": ("ผู้บริหาร/กรรมการเข้า-ออก", "high"),
     "5.03": ("แก้ข้อบังคับบริษัท", "info"),
     "5.07": ("ผลโหวตผู้ถือหุ้น", "info"),
@@ -515,3 +518,47 @@ REPLAN_MIN_HOURS_APART = 12
 # และใครรู้ชื่อ topic ก็อ่านได้ จึงให้ผู้ใช้เปิดเองโดยตั้งใจเท่านั้น
 NOTIFY_CONFIG = Path.home() / ".config" / "finbg" / "notify.json"
 NTFY_SERVER = "https://ntfy.sh"
+
+
+# --- สแกนทั้งตลาดหาโอกาสที่คนมองข้าม (finbg/scan · โน้ต 12) ------------------------
+# กรวย 4 ชั้น: โค้ดเก็บทั้งตลาด → โค้ดให้คะแนน → Sonnet คัดกรอง → Opus ดำลึก
+# ผู้ใช้เลือก (2026-10-25): หุ้นสหรัฐที่มีสภาพคล่องทั้งหมด · ดำลึก ≤ 5 ไอเดีย/วัน · พอร์ตไอเดียแยกจาก PM
+RAW_SCREENER = RAW / "screener"            # snapshot ราคา/มูลค่าตลาดของทั้งตลาด (ย้อนหลังไม่ได้)
+RAW_SEC_INDEX = RAW / "sec_index"          # รายการ filing ทั้งหมดของ SEC ต่อวัน
+RAW_INSIDER = RAW / "insider"              # Form 4 ที่แยกรายการแล้ว
+RAW_EARNINGS = RAW / "earnings_calendar"   # ปฏิทินงบทั้งตลาด + EPS จริง/คาด + จำนวนนักวิเคราะห์
+OPPORTUNITIES = DATA / "opportunities"     # ไอเดีย กลุ่มควบคุม ผลลัพธ์ — สร้างย้อนหลังไม่ได้
+JOURNAL_OPPORTUNITIES = JOURNAL / "Opportunities"
+
+NASDAQ_SCREENER_URL = "REMOVED in the public edition: api.nasdaq.com disallows automated access (robots.txt)"
+NASDAQ_EARNINGS_URL = "REMOVED in the public edition: api.nasdaq.com disallows automated access (robots.txt)"
+# API ของ Nasdaq ไม่เป็นทางการ ต้องส่ง header แบบเบราว์เซอร์ — วันหนึ่งอาจเปลี่ยนแล้วพัง
+# ระบบจึงถือว่าเป็นขั้นตอนที่ "ขาดได้" (ส่วน SEC เป็นทางการ ทำงานต่อได้)
+BROWSER_HEADERS = {
+    "User-Agent": "REMOVED in the public edition",
+    "Accept": "application/json, text/plain, */*",
+}
+
+# universe: ซื้อขายได้จริงสำหรับรายย่อย — หุ้นจิ๋วตัดออก (spread กว้าง ต้นทุนกินกำไรหมด)
+SCAN_MIN_MCAP = 300e6
+SCAN_MIN_DOLLAR_VOLUME = 2e6               # มัธยฐาน 20 วัน (ถ้ามี) ไม่งั้นใช้ของวันนั้น
+SCAN_BACKFILL_PER_RUN = 600                # ดึงประวัติราคาให้ตัวใหม่ได้สูงสุดเท่านี้ต่อรอบ
+
+SCAN_CANDIDATES = 30                       # ชั้น 1 → ชั้น 2 (Sonnet อ่าน)
+SCAN_DEEP_DIVES = 5                        # ชั้น 2 → ชั้น 3 (Opus ดำลึก) — งบที่ผู้ใช้อนุมัติ
+TRIAGE_MODEL = "claude-sonnet-5-5"
+TRIAGE_EFFORT = "medium"
+DEEP_DIVE_EFFORT = "high"
+INSIDER_LOOKBACK_DAYS = 10
+INSIDER_CLUSTER_MIN_BUYERS = 2
+INSIDER_CLUSTER_MIN_VALUE = 100_000        # ดอลลาร์ รวมทุกคนในช่วง lookback
+INSIDER_SINGLE_BIG_BUY = 250_000
+INSIDER_HOLDER_BIG_BUY = 1_000_000         # ผู้ถือเกิน 10% (กองทุน) ซื้อเพิ่มในตลาด
+
+# พอร์ตไอเดีย (paper) — ทุกไอเดียถือเท่ากัน ระยะเวลาเท่ากัน ตั้งกติกาไว้ก่อนเห็นผล
+IDEA_HOLD_SESSIONS = 20
+IDEA_COST_BPS = 30.0                       # ไป-กลับ — หุ้นกลาง/เล็กแพงกว่าหุ้นใหญ่
+IDEA_SMALL_CAP_BENCHMARK = "IWM"           # มูลค่าตลาด < IDEA_LARGE_CAP → เทียบ IWM
+IDEA_LARGE_CAP = 10e9
+IDEA_LARGE_CAP_BENCHMARK = "SPY"
+IDEA_GATE_MIN_RESOLVED = 100               # ตัดสินว่ามี edge ไหม เมื่อมีไอเดียครบเท่านี้
