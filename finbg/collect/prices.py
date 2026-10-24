@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import yfinance as yf
 
-from .. import config, storage
+from .. import config, market, storage
 
 
 def _tidy(raw: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
@@ -56,12 +56,96 @@ def _tidy(raw: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
     return df.dropna(subset=["close"]).sort_values(["ticker", "date"]).reset_index(drop=True)
 
 
+def _history_rows() -> dict[str, int]:
+    """จำนวนแถวราคาที่มีในคลังต่อ ticker — ใช้ตัดสินว่าตัวไหนยังไม่เคยดึงย้อนหลัง"""
+    df = storage.read_all_prices()
+    if df.empty:
+        return {}
+    return df.groupby("ticker").size().to_dict()
+
+
+def _backfill_attempted() -> set[str]:
+    """ticker ที่เคยสั่งดึงย้อนหลังไปแล้ว (อ่านจาก manifest)
+
+    กันการดึงซ้ำทุกวันสำหรับหุ้นที่ประวัติสั้นจริง ๆ (เช่น เพิ่ง IPO)
+    ซึ่งดึงกี่ครั้งก็ได้แถวเท่าเดิม
+    """
+    done: set[str] = set()
+    if not config.MANIFEST.exists():
+        return done
+    import json
+    for line in config.MANIFEST.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("kind") == "prices_backfill":
+            done.update(record.get("tickers_list") or [])
+    return done
+
+
+def _download(tickers: list[str], period: str) -> pd.DataFrame:
+    raw = yf.download(
+        tickers,
+        period=period,
+        auto_adjust=False,
+        progress=False,
+        threads=True,
+    )
+    return _tidy(raw, tickers)
+
+
+def backfill_short_history(min_rows: int = config.PRICE_BACKFILL_MIN_ROWS) -> dict[str, object]:
+    """ดึงย้อนหลัง 10 ปีให้ ticker ที่ประวัติสั้นผิดปกติ
+
+    ## ปัญหาที่แก้
+
+    การดึง 10 ปีเกิดครั้งเดียวตอนคลังว่าง หลังจากนั้นดึงแค่ 1 เดือนล่าสุด
+    หุ้นที่เพิ่มเข้า watchlist ทีหลัง (16 ตัวเมื่อ 6 ส.ค.) จึงมีประวัติแค่ไม่กี่เดือน
+    → brief แสดง 1y และ MA200 เป็น "—" และงานวิจัยย้อนหลังใช้หุ้นพวกนี้ไม่ได้
+
+    ราคาย้อนหลังเป็นข้อมูลที่ "ดึงย้อนหลังได้" จึงซ่อมได้เสมอ ต่างจากข่าว
+    """
+    rows = _history_rows()
+    attempted = _backfill_attempted()
+    short = [
+        t for t in config.all_tickers()
+        if rows.get(t, 0) < min_rows and t not in attempted
+    ]
+    if not short:
+        return {"ok": True, "backfilled": 0}
+
+    df = _download(short, "10y")
+    df, dropped = market.drop_incomplete_session(df)
+    if df.empty:
+        return {"ok": False, "reason": f"yfinance คืนข้อมูลว่างสำหรับ {', '.join(short)}"}
+
+    stamp = storage.utc_now().strftime("%Y-%m-%d")
+    path = storage.write_parquet(
+        df,
+        config.RAW_PRICES / f"{stamp}.parquet",
+        kind="prices_backfill",
+        period="10y",
+        tickers=len(short),
+        tickers_list=short,
+    )
+    return {
+        "ok": True,
+        "backfilled": len(short),
+        "rows": len(df),
+        "path": str(path.relative_to(config.ROOT)),
+    }
+
+
 def collect(period: str | None = None) -> dict[str, object]:
     """ดึงราคาแล้วเขียน snapshot 1 ไฟล์ต่อ 1 การรัน
 
     `period` = None หมายถึงให้ตัดสินใจอัตโนมัติ:
     - ยังไม่มีข้อมูลเลย → ดึงย้อนหลัง 10 ปี (backfill ครั้งเดียว)
     - มีข้อมูลแล้ว → ดึงแค่ 1 เดือนล่าสุด (จับการปรับราคาย้อนหลังด้วย)
+
+    แท่งของวันที่ตลาดยังเปิดอยู่จะถูกตัดทิ้งเสมอ — ดู market.drop_incomplete_session
+    จากนั้นเติมประวัติให้ ticker ที่ประวัติสั้นผิดปกติ (ถ้ามี)
     """
     storage.ensure_dirs()
     tickers = config.all_tickers()
@@ -70,14 +154,8 @@ def collect(period: str | None = None) -> dict[str, object]:
         already_have = any(config.RAW_PRICES.glob("*.parquet"))
         period = "1mo" if already_have else "10y"
 
-    raw = yf.download(
-        tickers,
-        period=period,
-        auto_adjust=False,
-        progress=False,
-        threads=True,
-    )
-    df = _tidy(raw, tickers)
+    df = _download(tickers, period)
+    df, dropped = market.drop_incomplete_session(df)
 
     if df.empty:
         return {"ok": False, "rows": 0, "reason": "yfinance คืนข้อมูลว่าง"}
@@ -89,9 +167,10 @@ def collect(period: str | None = None) -> dict[str, object]:
         kind="prices",
         period=period,
         tickers=len(tickers),
+        dropped_incomplete=dropped,
     )
 
-    return {
+    result: dict[str, object] = {
         "ok": True,
         "rows": len(df),
         "tickers": df["ticker"].nunique(),
@@ -99,3 +178,12 @@ def collect(period: str | None = None) -> dict[str, object]:
         "date_max": str(df["date"].max().date()),
         "path": str(path.relative_to(config.ROOT)),
     }
+    if dropped:
+        result["dropped_incomplete"] = dropped
+
+    backfill = backfill_short_history()
+    if backfill.get("backfilled"):
+        result["backfilled"] = backfill["backfilled"]
+    elif not backfill.get("ok"):
+        result["backfill_note"] = backfill.get("reason")
+    return result

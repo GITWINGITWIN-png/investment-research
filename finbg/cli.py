@@ -20,6 +20,8 @@ from typing import Any
 from . import config, journal, labels, ledger, storage, workqueue
 from .brief import context as context_module
 from .brief import render as render_module
+from .collect import calendar as calendar_module
+from .collect import fundamentals as fundamentals_module
 from .collect import news as news_module
 from .collect import prices as prices_module
 
@@ -249,6 +251,18 @@ def cmd_label(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fundamentals_if_due() -> dict[str, Any]:
+    """งบเปลี่ยนรายไตรมาส — ดึงใหม่เฉพาะเมื่อเก่าเกินกำหนดหรือมี 10-Q/10-K ใหม่
+
+    แต่ละรอบโหลด JSON จาก SEC รวม ~100 MB จึงไม่ควรทำทุกวันโดยไม่มีเหตุ
+    """
+    is_due, reason = fundamentals_module.due()
+    if not is_due:
+        return {"ok": True, "skipped": reason}
+    print(f"  ↻ ดึงใหม่เพราะ: {reason}")
+    return fundamentals_module.collect()
+
+
 def cmd_daily(args: argparse.Namespace) -> int:
     """งานประจำวันที่ cron เรียก — เก็บข้อมูล คำนวณ ledger สร้าง brief
 
@@ -264,6 +278,8 @@ def cmd_daily(args: argparse.Namespace) -> int:
     # และการพลาดไป 1 วันเสียหายน้อยกว่าการให้ cron ส่งอีเมลเตือนทุกวันจนเราชิน
     steps: list[tuple[str, Any, bool]] = [
         ("prices", lambda: prices_module.collect(), True),
+        ("calendar", lambda: calendar_module.collect(), False),
+        ("fundamentals", _fundamentals_if_due, False),
         ("ledger", lambda: ledger.rebuild(), True),
     ]
     if not args.skip_news:

@@ -30,7 +30,7 @@ import re
 from typing import Any, Callable
 
 from .. import config, storage
-from .sources import gdelt, rss, sec, yahoo
+from .sources import gdelt, gnews, rss, sec, yahoo
 
 # ลำดับความน่าเชื่อถือ ใช้ตัดสินว่าเก็บอันไหนเมื่อเจอข่าวซ้ำ
 TYPE_RANK = {"primary": 3, "outlet": 2, "aggregator": 1}
@@ -39,6 +39,7 @@ SOURCES: dict[str, Callable[[], list[dict[str, Any]]]] = {
     "yahoo": yahoo.fetch,
     "rss": rss.fetch,
     "sec": sec.fetch,
+    "gnews": gnews.fetch,
     "gdelt": gdelt.fetch,
 }
 
@@ -63,7 +64,10 @@ def _dedupe(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         # ใช้พาดหัวเป็น key หลัก เพราะ URL ของข่าวเดียวกันต่างกันได้ตามแหล่ง
-        key = _title_key(title) or url
+        # ยกเว้นเอกสารต้นทาง: URL ของ SEC filing ไม่ซ้ำกันเสมอ แต่พาดหัวซ้ำกันได้
+        # (8-K สองฉบับของบริษัทเดียวกันในสัปดาห์เดียว พาดหัวเหมือนกันเป๊ะ)
+        # ถ้าใช้พาดหัวเป็น key ฉบับหนึ่งจะหายไปเงียบ ๆ — บั๊กนี้มีอยู่จริงก่อน 2026-10-24
+        key = url if record.get("source_type") == "primary" else (_title_key(title) or url)
         current = best.get(key)
 
         if current is None:

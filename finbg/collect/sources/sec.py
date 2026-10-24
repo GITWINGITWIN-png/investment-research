@@ -63,6 +63,35 @@ def _ticker_to_cik() -> dict[str, str]:
     return mapping
 
 
+def _field(recent: dict[str, Any], key: str, i: int) -> str:
+    """อ่านคอลัมน์ที่ i ของ submissions JSON แบบไม่พังเมื่อคอลัมน์ไม่มี/สั้นกว่า"""
+    column = recent.get(key) or []
+    return str(column[i]) if i < len(column) and column[i] is not None else ""
+
+
+SEVERITY_RANK = {"info": 0, "high": 1, "critical": 2}
+
+
+def item_severity(items: list[str]) -> str:
+    """ระดับความรุนแรงสูงสุดของ 8-K จากหัวข้อทั้งหมดที่ยื่นมาพร้อมกัน"""
+    levels = [config.SEC_8K_ITEMS.get(code, ("", "info"))[1] for code in items]
+    return max(levels, key=SEVERITY_RANK.get, default="info")
+
+
+def _title(form: str, ticker: str, description: str, items: list[str]) -> str:
+    """พาดหัวที่อ่านแล้วรู้ทันทีว่าเรื่องอะไร
+
+    8-K ที่มี items: "[8-K] TSLA — 2.02 ประกาศผลประกอบการ · 9.01 เอกสารแนบ"
+    ฟอร์มอื่น: "[10-Q] GE — 10-Q" (เหมือนเดิม)
+    """
+    if form == "8-K" and items:
+        named = " · ".join(
+            f"{code} {config.SEC_8K_ITEMS.get(code, ('ไม่ทราบหัวข้อ', 'info'))[0]}" for code in items
+        )
+        return f"[{form}] {ticker} — {named}"
+    return f"[{form}] {ticker} — {description}"
+
+
 def fetch(tickers: list[str] | None = None, lookback_days: int = 7) -> list[dict[str, Any]]:
     """ดึง filing ล่าสุดของ watchlist — เฉพาะฟอร์มที่บอกเหตุการณ์จริง
 
@@ -102,24 +131,37 @@ def fetch(tickers: list[str] | None = None, lookback_days: int = 7) -> list[dict
                 continue
 
             accession = recent["accessionNumber"][i]
-            document = recent.get("primaryDocument", [""] * (i + 1))[i]
+            document = _field(recent, "primaryDocument", i)
             url = ARCHIVE_URL.format(
                 cik_int=int(cik),
                 accession_nodash=accession.replace("-", ""),
                 doc=document,
             )
 
-            description = recent.get("primaryDocDescription", [""] * (i + 1))[i] or form
+            items = [code.strip() for code in _field(recent, "items", i).split(",") if code.strip()]
+            description = _field(recent, "primaryDocDescription", i) or form
+            accepted = _field(recent, "acceptanceDateTime", i)
             records.append(
                 normalize(
                     url=url,
-                    title=f"[{form}] {ticker} — {description}",
-                    published_at=f"{filing_date}T00:00:00+00:00",
+                    title=_title(form, ticker, description, items),
+                    # เวลาที่ SEC รับเอกสารจริง (ละเอียดถึงวินาที) แม่นกว่าวันที่ยื่นมาก
+                    # เช่น งบ TSLA "ยื่น 21 ต.ค." แต่ SEC รับตอน 00:41 UTC ของวันที่ 22
+                    # (= หลังตลาดปิดวันที่ 21) — knowledge time ที่ถูกต้องคือเวลาหลัง
+                    published_at=accepted.replace(".000Z", "+00:00") if accepted
+                    else f"{filing_date}T00:00:00+00:00",
                     source=SOURCE,
                     source_type=SOURCE_TYPE,
                     publisher="SEC EDGAR",
                     tickers=[ticker],
-                    extra={"form": form, "accession": accession, "filing_date": filing_date},
+                    extra={
+                        "form": form,
+                        "accession": accession,
+                        "filing_date": filing_date,
+                        "items": items,
+                        "severity": item_severity(items),
+                        "report_date": _field(recent, "reportDate", i),
+                    },
                 )
             )
 

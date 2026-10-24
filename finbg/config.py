@@ -113,6 +113,9 @@ def all_tickers() -> list[str]:
 
 LEDGER_START_CAPITAL = 100_000.0
 
+# ticker ที่มีราคาน้อยกว่านี้ (≈4 ปี) ถือว่า "ยังไม่เคยดึงย้อนหลัง" → ดึง 10 ปีให้อัตโนมัติ
+PRICE_BACKFILL_MIN_ROWS = 1000
+
 # 12-1 momentum จะเลือกจากกลุ่มนี้ (sector rotation แบบคลาสสิก)
 MOMENTUM_POOL: list[str] = list(SECTORS)
 MOMENTUM_TOP_N = 3
@@ -150,7 +153,12 @@ NEWS_QUERIES: list[str] = [
 # --- แหล่งข่าว: เปิดใช้แหล่งไหนบ้าง ------------------------------------------
 # เรียงจากเร็ว/เชื่อถือได้มากที่สุด ไปหาช้าที่สุด
 # ตัดแหล่งไหนออกก็แค่ลบชื่อออกจาก list นี้
-NEWS_SOURCES: list[str] = ["yahoo", "rss", "sec", "gdelt"]
+#
+# yahoo ถูกปิด (2026-10-23): log รายวันแสดง "yahoo → 0 รายการ" มาตลอด
+# ทดสอบแล้วว่า Ticker.news คืน list ว่างทั้ง yfinance 1.5.2 และ 1.7.0 (รุ่นล่าสุด)
+# = Yahoo เปลี่ยนฝั่งเซิร์ฟเวอร์ ไม่ใช่บั๊กของเรา โค้ดยังเก็บไว้ เปิดใหม่ได้ถ้ากลับมาใช้ได้
+# แทนด้วย gnews (Google News RSS) ที่ค้นรายบริษัท ไม่ต้องมี API key
+NEWS_SOURCES: list[str] = ["rss", "sec", "gnews", "gdelt"]
 
 # ชื่อบริษัทที่ข่าวมักใช้แทน ticker — ใช้จับคู่ข่าวกับหุ้นจากพาดหัว
 # จับด้วยขอบเขตคำ (\b) ไม่ใช่ substring — ดู tag_tickers()
@@ -226,6 +234,37 @@ SEC_MIN_INTERVAL_SEC = 0.15      # SEC อนุญาต ~10 req/s เราเ
 # เอาเฉพาะฟอร์มที่บอก "เหตุการณ์" จริง
 # ตัด Form 3/4/5 (ซื้อขายของผู้บริหาร) ออกเพราะมีเยอะและส่วนใหญ่ตามแผนที่ตั้งไว้ล่วงหน้า
 SEC_FORMS: set[str] = {"8-K", "10-Q", "10-K", "S-1", "DEF 14A", "SC 13D", "SC 13G"}
+
+# หัวข้อของ 8-K (Item) — ตัวบอกว่า filing นั้น "เรื่องอะไร" โดยไม่ต้องเปิดอ่าน
+# เดิมพาดหัว 8-K เป็นแค่ "[8-K] TSLA — 8-K" ทำให้ตอน label ต้องเดาว่าเป็น neutral
+# ทั้งที่ SEC บอกหัวข้อมาให้แล้วในฟิลด์ items ของ submissions JSON
+#
+# ระดับความรุนแรง (ใช้ตอนเฝ้าระวัง):
+#   critical — เหตุการณ์ที่เปลี่ยนภาพบริษัททันที ต้องวางแผนใหม่
+#   high     — สำคัญ ควรทบทวนถ้าถือหุ้นตัวนั้นอยู่
+#   info     — บันทึกไว้ให้แผนรายสัปดาห์อ่าน ไม่ต้องปลุกใคร
+SEC_8K_ITEMS: dict[str, tuple[str, str]] = {
+    "1.01": ("ทำสัญญาสำคัญ", "info"),
+    "1.02": ("ยกเลิกสัญญาสำคัญ", "high"),
+    "1.03": ("ล้มละลาย/พิทักษ์ทรัพย์", "critical"),
+    "1.05": ("เหตุการณ์ไซเบอร์ร้ายแรง", "critical"),
+    "2.01": ("ซื้อ/ขายกิจการเสร็จสิ้น", "high"),
+    "2.02": ("ประกาศผลประกอบการ", "info"),
+    "2.03": ("ก่อหนี้สำคัญ", "info"),
+    "2.04": ("เหตุผิดนัด/เร่งชำระหนี้", "critical"),
+    "2.05": ("ปรับโครงสร้าง/ปลดคน", "high"),
+    "2.06": ("ด้อยค่าสินทรัพย์", "high"),
+    "3.01": ("ถูกเตือนเรื่องเพิกถอนหุ้น", "critical"),
+    "3.02": ("ขายหุ้นเพิ่มทุนแบบไม่จดทะเบียน", "info"),
+    "4.01": ("เปลี่ยนผู้สอบบัญชี", "high"),
+    "4.02": ("งบเดิมเชื่อถือไม่ได้ (ต้องแก้ย้อนหลัง)", "critical"),
+    "5.02": ("ผู้บริหาร/กรรมการเข้า-ออก", "high"),
+    "5.03": ("แก้ข้อบังคับบริษัท", "info"),
+    "5.07": ("ผลโหวตผู้ถือหุ้น", "info"),
+    "7.01": ("เปิดเผยข้อมูลตาม Reg FD", "info"),
+    "8.01": ("เหตุการณ์อื่น", "info"),
+    "9.01": ("เอกสารแนบ", "info"),
+}
 
 
 def watchlist_news_query() -> str:
@@ -303,3 +342,159 @@ LABEL_PRIMARY_TYPES: set[str] = {"primary"}
 #
 # ตั้งเป็น 0 เพื่อปิดโควตา (กลับไปพฤติกรรมเดิม: label ทุกชิ้นที่ผ่านตัวกรอง)
 LABEL_SECTOR_QUOTA = 6
+
+
+# --- Google News RSS (แทน Yahoo) ---------------------------------------------
+# ค้นรายบริษัท: ("ชื่อบริษัท" OR TICKER) stock when:2d — ฟรี ไม่ต้องมี key
+# จัดเป็น aggregator เพราะ Google รวบรวมมาจากหลายสำนัก (ลำดับความน่าเชื่อถือต่ำสุด)
+# ลิงก์เป็นลิงก์ของ Google ที่ redirect ไปบทความจริง — คงที่ ใช้เป็น key ได้
+GNEWS_ENDPOINT = "REMOVED in the public edition: news.google.com disallows automated access (robots.txt)"
+GNEWS_MAX_PER_QUERY = 15        # 24 บริษัท × 15 = เพดาน 360 ชิ้น/วัน ก่อนตัดซ้ำ
+GNEWS_MIN_INTERVAL_SEC = 1.5    # สุภาพกับเซิร์ฟเวอร์ — ไม่มีเอกสาร rate limit ทางการ
+GNEWS_WINDOW = "2d"
+
+# --- ปฏิทินงบ + ประมาณการของนักวิเคราะห์ --------------------------------------
+# yfinance Ticker.calendar ให้วันประกาศงบครั้งถัดไป + ค่าเฉลี่ย EPS/รายได้ที่นักวิเคราะห์คาด
+# ประมาณการแบบ point-in-time **ย้อนหลังหาฟรีไม่ได้** (ถูกเขียนทับทุกวัน)
+# จึงเก็บ snapshot ทุกวัน — วัตถุดิบของ factor "earnings surprise" ในอนาคต
+RAW_CALENDAR = RAW / "calendar"
+
+# --- งบการเงิน (SEC XBRL companyfacts) ----------------------------------------
+# ทุกตัวเลขมีวันที่ยื่นจริง (filed) = knowledge_date ในตัว → ไม่มี look-ahead
+# SEC เก็บย้อนหลังทั้งหมด จึงไม่ต้องเก็บ JSON ดิบ (4–8 MB ต่อบริษัท)
+# เก็บเฉพาะ concept ที่ใช้ ลงตารางเดียวต่อรอบ (เล็กมาก)
+RAW_FUNDAMENTALS = RAW / "fundamentals"
+FUNDAMENTALS_REFRESH_DAYS = 6
+
+# บริษัทที่เปลี่ยนนิติบุคคลผู้ยื่น (CIK) — ประวัติงบอยู่ใต้ CIK เก่า ต้องดึงทั้งสองแล้วรวมกัน
+# XOM: ปี 2026 ปรับโครงสร้างเป็นบริษัทโฮลดิ้ง "ExxonMobil Holdings Corp" (CIK 0002115436)
+# ซึ่งเพิ่งยื่น 10-Q ฉบับเดียว — ประวัติทั้งหมดอยู่ที่ Exxon Mobil Corporation (CIK 0000034088)
+# พบเมื่อ 2026-10-24: งบ XOM ว่างทั้งแถว เพราะ ticker ชี้ไป CIK ใหม่แล้ว
+SEC_PREDECESSOR_CIKS: dict[str, list[str]] = {
+    "XOM": ["0000034088"],
+}   # ดึงใหม่เมื่อเก่ากว่านี้ หรือมี 10-Q/10-K ใหม่ของ watchlist
+FUNDAMENTAL_FORMS: set[str] = {"10-Q", "10-K", "10-Q/A", "10-K/A", "10-KT"}
+
+# metric → รายชื่อ concept ที่ลองตามลำดับ (บริษัทต่างกันใช้ชื่อต่างกัน — ธนาคารต่างมาก)
+FUNDAMENTAL_CONCEPTS: dict[str, list[tuple[str, str, str]]] = {
+    # revenue เลือก "ตัวที่ใหญ่ที่สุดในบรรดาที่สดอยู่" (ดู fundamentals._pick_concept)
+    # เพราะบางบริษัทแท็กทั้งยอดรวมและยอดย่อย เช่น AMT: Revenues = รวม,
+    # RevenueFromContract... = แค่ส่วนบริการ — ยอดรวมไม่มีทางเล็กกว่าส่วนย่อย
+    "revenue": [
+        ("us-gaap", "Revenues", "USD"),
+        ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax", "USD"),
+        ("us-gaap", "RevenuesNetOfInterestExpense", "USD"),
+        ("us-gaap", "RevenueFromContractWithCustomerIncludingAssessedTax", "USD"),
+        ("us-gaap", "RegulatedAndUnregulatedOperatingRevenue", "USD"),
+        ("us-gaap", "SalesRevenueNet", "USD"),
+    ],
+    "net_income": [
+        ("us-gaap", "NetIncomeLoss", "USD"),
+        ("us-gaap", "NetIncomeLossAvailableToCommonStockholdersBasic", "USD"),
+        ("us-gaap", "ProfitLoss", "USD"),
+    ],
+    "eps_diluted": [("us-gaap", "EarningsPerShareDiluted", "USD/shares")],
+    "operating_income": [("us-gaap", "OperatingIncomeLoss", "USD")],
+    "gross_profit": [("us-gaap", "GrossProfit", "USD")],
+    "cfo": [("us-gaap", "NetCashProvidedByUsedInOperatingActivities", "USD")],
+    "capex": [
+        ("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment", "USD"),
+        ("us-gaap", "PaymentsToAcquireProductiveAssets", "USD"),     # NVDA, AMZN ใช้ชื่อนี้
+    ],
+    "equity": [
+        ("us-gaap", "StockholdersEquity", "USD"),
+        ("us-gaap", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest", "USD"),
+    ],
+    "debt": [
+        ("us-gaap", "LongTermDebt", "USD"),
+        ("us-gaap", "LongTermDebtNoncurrent", "USD"),
+    ],
+    "cash": [
+        ("us-gaap", "CashAndCashEquivalentsAtCarryingValue", "USD"),
+        ("us-gaap", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", "USD"),
+    ],
+    "shares_out": [("dei", "EntityCommonStockSharesOutstanding", "shares")],
+    "diluted_shares": [("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding", "shares")],
+}
+# metric ที่เป็น "ยอดสะสมช่วงเวลา" (งบกำไรขาดทุน/กระแสเงินสด) — ต้องแปลงเป็นรายไตรมาสก่อนรวม TTM
+FUNDAMENTAL_FLOWS: set[str] = {
+    "revenue", "net_income", "eps_diluted", "operating_income",
+    "gross_profit", "cfo", "capex", "diluted_shares",
+}
+
+# --- Portfolio Manager: แผนรายสัปดาห์ (ดูโน้ต 11) -------------------------------
+# LLM ไม่ได้เทรด — มันเขียน "แผน" ที่โค้ดตรวจและนำไปรันเป็นพอร์ตกระดาษ
+# กติกาทั้งหมดอยู่ที่นี่ในโค้ด ไม่ใช่ในพรอมต์ เพราะโมเดลแก้โค้ดไม่ได้แต่เถียงพรอมต์ได้
+PLANS = DATA / "plans"                 # แผนที่ผ่านการตรวจ — สร้างย้อนหลังไม่ได้ ต้องสำรอง
+PLAN_REQUESTS = PLANS / "requests"     # พรอมต์ที่ส่งจริงทุกครั้ง = หลักฐานว่าแผนรู้อะไร
+JOURNAL_PLANS = JOURNAL / "Plans"
+
+# โมเดลล็อกตายตัว เหตุผลเดียวกับ LABEL_MODEL: ถ้าเปลี่ยนโมเดลกลางทาง ผลงานของ PM
+# จะมีรอยต่อที่แยกไม่ออกว่าเป็นฝีมือหรือเป็นแค่การเปลี่ยนสมอง
+PLAN_MODEL = "claude-opus-5-5"
+PLAN_EFFORT = "high"                   # งานสัปดาห์ละครั้ง คุ้มที่จะให้คิดลึก
+PLAN_TIMEOUT_SEC = 1800
+PLAN_MAX_BUDGET_USD = 8.0              # เพดานกันหลุด (บน Pro เป็นตัวเลขเทียบเท่า ไม่ได้ตัดเงินจริง)
+PLAN_MAX_ATTEMPTS = 2                  # แผนไม่ผ่านการตรวจ → ส่งข้อผิดพลาดกลับให้แก้ได้อีก 1 ครั้ง
+
+# ช่วงเวลาออกแผน (เวลาไทย): ตั้งแต่เช้าวันเสาร์ หลังตลาดวันศุกร์ปิดและข้อมูลเข้าแล้ว
+# ถ้าเครื่องปิดทั้งสุดสัปดาห์ แผนจะออกตอนเปิดเครื่องครั้งแรก (ยังทันก่อนตลาดเปิดวันจันทร์)
+PLAN_WINDOW_WEEKDAY = 5                # 5 = เสาร์
+PLAN_WINDOW_HOUR = 5
+
+# --- Mandate: กรอบที่ PM ขยับได้ -----------------------------------------------
+# แกน (core) เป็นกฎตายตัวที่ทดสอบย้อนหลังได้ · LLM คุมเฉพาะส่วน satellite
+# แบบนี้วัดได้ตรง ๆ ว่า "ส่วนที่ LLM ตัดสินใจ" เพิ่มหรือลดค่า โดยเทียบกับ control
+# ที่ถือ satellite แบบเฉย ๆ (PM_PASSIVE_SATELLITE) บนตารางปรับพอร์ตเดียวกันทุกประการ
+PM_CORE_WEIGHT = 0.70
+PM_CORE_MIX: dict[str, float] = {"SPY": 0.60, "AGG": 0.40}
+PM_PASSIVE_SATELLITE: dict[str, float] = {"SPY": 1.0}
+
+# ตัวที่ satellite ถือได้ — ETF ดัชนี/พันธบัตร/ทอง + ETF รายหมวด + หุ้นใน watchlist
+PM_BROAD_ETFS: set[str] = {"SPY", "QQQ", "IWM", "AGG", "TLT", "GLD"}
+PM_SATELLITE_UNIVERSE: list[str] = sorted({*PM_BROAD_ETFS, *SECTORS, *WATCHLIST})
+
+# เพดานต่อตัว (สัดส่วนของ satellite) — satellite = 30% ของพอร์ต
+#   ETF ดัชนี 100% (= ถือ SPY ทั้งก้อนได้ = control) · ETF หมวด 40% (= 12% ของพอร์ต)
+#   หุ้นรายตัว 25% (= 7.5% ของพอร์ต) — ตัวเดียวพังไม่ทำให้พอร์ตพัง
+PM_CAP_BROAD = 1.00
+PM_CAP_SECTOR = 0.40
+PM_CAP_STOCK = 0.25
+PM_MAX_POSITIONS = 10
+
+# turnover ต่อแผน (ขาเดียว = ผลรวมของส่วนที่เพิ่มขึ้น) — กัน "action flipping" ที่งานวิจัยพบ
+# 0.5 = เปลี่ยน satellite ได้ครึ่งเดียวต่อครั้ง (15% ของพอร์ต) · ต่ำกว่า PM_MIN_CHANGE ถือว่าไม่เปลี่ยน
+PM_MAX_TURNOVER = 0.50
+PM_MIN_CHANGE = 0.02
+
+# ต้นทุนซื้อขาย (ค่าคอม + spread + slippage) ต่อมูลค่าที่ซื้อขาย — ETF/หุ้นใหญ่ ประมาณการแบบระมัดระวัง
+PM_COST_BPS = 10.0
+
+# คำทำนายในแผน — อย่างน้อย 1 ข้อทุกแผน เพื่อวัด calibration ได้
+PM_MIN_PREDICTIONS = 1
+PM_MAX_PREDICTIONS = 5
+PM_PREDICTION_MIN_DAYS = 5
+PM_PREDICTION_MAX_DAYS = 92
+
+# --- Alerts: เฝ้าระวังข่าว/ราคาแรง -------------------------------------------
+ALERTS = DATA / "alerts"
+JOURNAL_ALERTS = JOURNAL / "Alerts"
+
+# ราคา: z = ผลตอบแทนวันนี้ / ความผันผวนรายวัน 60 วัน
+ALERT_SHOCK_Z = 3.0
+ALERT_SHOCK_MIN_MOVE = {"stock": 4.0, "etf": 2.0}     # % ขั้นต่ำ กันหุ้นนิ่งมากแกว่งนิดเดียวก็ z สูง
+ALERT_MARKET_MOVE = 2.5                                # SPY ขยับเกินนี้ (%) ในวันเดียว
+ALERT_VIX_LEVEL = 30.0
+ALERT_VIX_JUMP = 30.0                                  # VIX พุ่งเกินนี้ (%) ในวันเดียว
+ALERT_LABEL_MATERIALITY = 75                           # label ข่าวที่ถือว่า "แรง"
+
+# วางแผนใหม่อัตโนมัติเมื่อมี alert ระดับ critical/high — มีเพดานกันวนลูปเผาโควตา
+REPLAN_MAX_PER_WEEK = 2
+REPLAN_MIN_HOURS_APART = 12
+
+# --- การแจ้งเตือน ------------------------------------------------------------
+# ค่าเริ่มต้น = แจ้งบนเดสก์ท็อปเท่านั้น (notify-send) ไม่ส่งอะไรออกนอกเครื่อง
+# อยากได้บนมือถือ: `uv run finbg notify setup` (ntfy.sh) — ข้อความจะผ่านเซิร์ฟเวอร์สาธารณะ
+# และใครรู้ชื่อ topic ก็อ่านได้ จึงให้ผู้ใช้เปิดเองโดยตั้งใจเท่านั้น
+NOTIFY_CONFIG = Path.home() / ".config" / "finbg" / "notify.json"
+NTFY_SERVER = "https://ntfy.sh"

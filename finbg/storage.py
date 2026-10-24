@@ -37,10 +37,17 @@ def ensure_dirs() -> None:
     for path in (
         config.RAW_PRICES,
         config.RAW_NEWS,
+        config.RAW_CALENDAR,
+        config.RAW_FUNDAMENTALS,
         config.DERIVED,
         config.PREDICTIONS,
         config.HYPOTHESES,
         config.BRIEFS,
+        config.PLANS,
+        config.PLAN_REQUESTS,
+        config.JOURNAL_PLANS,
+        config.ALERTS,
+        config.JOURNAL_ALERTS,
     ):
         path.mkdir(parents=True, exist_ok=True)
 

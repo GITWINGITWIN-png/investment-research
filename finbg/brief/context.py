@@ -18,6 +18,8 @@ from typing import Any
 import pandas as pd
 
 from .. import config, ledger, storage
+from ..collect import calendar as calendar_module
+from ..collect import fundamentals as fundamentals_module
 
 # ช่วงเวลาที่ดูย้อนหลัง (วันทำการโดยประมาณ)
 HORIZONS: dict[str, int] = {
@@ -70,7 +72,26 @@ def _ticker_snapshot(series: pd.Series) -> dict[str, Any]:
         ma200 = float(clean.tail(200).mean())
         snapshot["vs_ma200_pct"] = round((last / ma200 - 1.0) * 100, 2)
 
+    snapshot.update(_quant_signals(clean))
     return snapshot
+
+
+def _quant_signals(clean: pd.Series) -> dict[str, Any]:
+    """สัญญาณเชิงปริมาณพื้นฐาน — คำนวณด้วยโค้ด ไม่ใช้ token
+
+    - `mom_12_1_pct`: ผลตอบแทน 12 เดือน ข้ามเดือนล่าสุด (นิยามเดียวกับ ledger.mom_12_1)
+    - `vol_60d_pct`: ความผันผวนรายปีจากผลตอบแทนรายวัน 60 วัน
+
+    ⚠️ ยังไม่ผ่านการพิสูจน์ใน harness (finlab) ว่ามีพลังทำนายบน universe นี้
+    ให้ถือเป็นข้อมูลประกอบ ไม่ใช่สัญญาณที่เชื่อได้ — แผนรายสัปดาห์ถูกบอกเรื่องนี้ไว้ตรง ๆ
+    """
+    out: dict[str, Any] = {}
+    if len(clean) > 252:
+        out["mom_12_1_pct"] = round((clean.iloc[-22] / clean.iloc[-253] - 1.0) * 100, 2)
+    returns = clean.pct_change().dropna()
+    if len(returns) >= 60:
+        out["vol_60d_pct"] = round(float(returns.tail(60).std() * (252 ** 0.5) * 100), 1)
+    return out
 
 
 def _breadth(prices: pd.DataFrame, tickers: list[str]) -> dict[str, Any]:
@@ -253,6 +274,15 @@ def _journal_block() -> dict[str, Any]:
     }
 
 
+def _fundamentals_block() -> dict[str, Any]:
+    """ตัวเลขงบล่าสุดต่อบริษัท (SEC XBRL) — ราคาที่ใช้คิด P/E คือราคาปิดล่าสุด"""
+    closes = storage.price_matrix("close")
+    if closes.empty:
+        return {}
+    last = closes.ffill().iloc[-1].dropna().to_dict()
+    return fundamentals_module.summary(closes=last)
+
+
 def build() -> dict[str, Any]:
     """ประกอบ context pack ทั้งหมด แล้วบันทึกเป็น JSON
 
@@ -290,6 +320,8 @@ def build() -> dict[str, Any]:
         "ledger": _ledger_block(),
         "news": _news_digest(),
         "journal": _journal_block(),
+        "fundamentals": _fundamentals_block(),
+        "earnings_upcoming": calendar_module.upcoming(days=14),
     }
 
     out_dir = config.DERIVED / "context"

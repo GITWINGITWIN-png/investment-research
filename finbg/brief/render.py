@@ -43,8 +43,8 @@ def _signal(value: Any) -> str:
 def _returns_table(items: dict[str, dict[str, Any]], label_key: str | None = "label") -> list[str]:
     """ตารางผลตอบแทนหลายช่วงเวลา ใช้ซ้ำได้ทั้ง benchmark / sector / watchlist"""
     lines = [
-        "| | สินทรัพย์ | ราคา | 1d | 1w | 1m | 3m | 1y | vs MA200 | ตำแหน่ง 52w |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| | สินทรัพย์ | ราคา | 1d | 1w | 1m | 3m | 1y | vs MA200 | ตำแหน่ง 52w | mom 12-1 | vol 60d |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for ticker, data in items.items():
         if not data or "returns_pct" not in data:
@@ -59,7 +59,69 @@ def _returns_table(items: dict[str, dict[str, Any]], label_key: str | None = "la
             f"{_fmt_pct(rets.get('1d'))} | {_fmt_pct(rets.get('1w'))} | "
             f"{_fmt_pct(rets.get('1m'))} | {_fmt_pct(rets.get('3m'))} | "
             f"{_fmt_pct(rets.get('1y'))} | {_fmt_pct(data.get('vs_ma200_pct'))} | "
-            f"{position if position is not None else '—'} |"
+            f"{position if position is not None else '—'} | "
+            f"{_fmt_pct(data.get('mom_12_1_pct'))} | "
+            f"{_fmt_num(data.get('vol_60d_pct'), '%')} |"
+        )
+    return lines
+
+
+def _fmt_num(value: Any, suffix: str = "", digits: int = 1) -> str:
+    return "—" if value is None else f"{value:.{digits}f}{suffix}"
+
+
+def _fmt_money(value: Any) -> str:
+    """เงินก้อนใหญ่แบบอ่านง่าย: 466.8B / 89.1M"""
+    if value is None:
+        return "—"
+    if abs(value) >= 1e12:
+        return f"{value / 1e12:.2f}T"
+    if abs(value) >= 1e9:
+        return f"{value / 1e9:.1f}B"
+    return f"{value / 1e6:.0f}M"
+
+
+def _fundamentals_section(pack: dict[str, Any]) -> list[str]:
+    """ตารางงบล่าสุดของ watchlist — จาก SEC XBRL (ตัวเลขตามที่บริษัทยื่นจริง)"""
+    data = pack.get("fundamentals") or {}
+    if not data:
+        return ["*ยังไม่มีข้อมูลงบ — รัน `uv run finbg daily` (ดึงอัตโนมัติสัปดาห์ละครั้ง)*"]
+    lines = [
+        "| หุ้น | งวดล่าสุด | รายได้ TTM | โต YoY | ไตรมาสล่าสุด YoY | อัตรากำไรสุทธิ | P/E | FCF yield | D/E |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for ticker in sorted(data):
+        row = data[ticker]
+        period = row.get("period_end") or "—"
+        if row.get("stale"):
+            period += " ⚠️"
+        lines.append(
+            f"| **{ticker}** | {period} | {_fmt_money(row.get('revenue_ttm'))} | "
+            f"{_fmt_pct(row.get('revenue_growth_pct'))} | {_fmt_pct(row.get('revenue_q_yoy_pct'))} | "
+            f"{_fmt_num(row.get('net_margin_pct'), '%')} | {_fmt_num(row.get('pe'))} | "
+            f"{_fmt_num(row.get('fcf_yield_pct'), '%')} | {_fmt_num(row.get('debt_to_equity'), '', 2)} |"
+        )
+    lines.extend([
+        "",
+        "> [!info] อ่านตารางนี้ยังไง",
+        "> TTM = รวม 12 เดือนล่าสุด · P/E ใช้กำไรต่อหุ้น TTM · FCF = กระแสเงินสดจากการดำเนินงาน − capex",
+        "> ⚠️ = งวดล่าสุดเก่ากว่า 135 วัน (SEC ยังไม่ประมวลผล 10-Q ฉบับล่าสุด) · "
+        "ธนาคารไม่มี FCF/D-E เพราะนิยามใช้กับธนาคารไม่ได้",
+    ])
+    return lines
+
+
+def _earnings_section(pack: dict[str, Any]) -> list[str]:
+    events = pack.get("earnings_upcoming") or []
+    if not events:
+        return ["*ไม่มีหุ้นใน watchlist ประกาศงบใน 14 วันข้างหน้า (หรือยังไม่มีข้อมูลปฏิทิน)*"]
+    lines = ["| วันที่ | หุ้น | EPS ที่คาด (เฉลี่ย) | รายได้ที่คาด |", "|---|---|---:|---:|"]
+    for event in events:
+        eps = event.get("eps_avg")
+        lines.append(
+            f"| {event['date']} | **{event['ticker']}** | "
+            f"{f'{eps:.2f}' if isinstance(eps, (int, float)) else '—'} | "
+            f"{_fmt_money(event.get('revenue_avg'))} |"
         )
     return lines
 
@@ -186,6 +248,17 @@ def render(pack: dict[str, Any]) -> str:
 
     out.extend(["", "---", "", "## 👀 Watchlist", ""])
     out.extend(_returns_table(pack.get("watchlist", {}), label_key=None))
+    out.extend([
+        "",
+        "> [!note] mom 12-1 และ vol 60d คำนวณด้วยโค้ด — ยังไม่ผ่านการพิสูจน์ว่าทำนายอะไรได้",
+        "> mom 12-1 = ผลตอบแทน 12 เดือนที่ข้ามเดือนล่าสุด · vol 60d = ความผันผวนรายปี",
+    ])
+
+    out.extend(["", "---", "", "## 🧾 งบการเงินล่าสุด (SEC XBRL)", ""])
+    out.extend(_fundamentals_section(pack))
+
+    out.extend(["", "---", "", "## 📅 ประกาศงบ 14 วันข้างหน้า", ""])
+    out.extend(_earnings_section(pack))
 
     # --- อะไรเปลี่ยนไป ---
     out.extend(["", "---", "", "## 🔄 เปลี่ยนแปลงตั้งแต่ brief ที่แล้ว", ""])
