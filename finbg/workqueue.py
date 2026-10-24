@@ -69,6 +69,21 @@ def build() -> list[dict[str, Any]]:
     """ประกอบคิวงานทั้งหมด เรียงตามความสำคัญ (L1 ก่อน L4)"""
     items: list[dict[str, Any]] = []
 
+    # L1 เดิม = เติมบทวิเคราะห์ใน brief ทุกวัน → ไม่มีใครทำจริง (45 ฉบับค้างหมด)
+    # แทนด้วยแผนรายสัปดาห์ที่ออกเองอัตโนมัติ — ขึ้นคิวเฉพาะเมื่อถึงเวลาแล้วยังไม่ออก
+    from .pm import runner as pm_runner
+
+    plan_state = pm_runner.due()
+    if plan_state["due"]:
+        items.append({
+            "level": "L1",
+            "perishable": True,
+            "cost": "กลาง (1 session)",
+            "what": f"แผนรายสัปดาห์ {plan_state['week']} ยังไม่ออก ({plan_state['reason']})",
+            "why": "แผนลงวันที่ = track record ของ PM · ออกช้าเท่าไหร่ สัปดาห์นั้นยิ่งสั้นลง",
+            "how": "uv run finbg plan run",
+        })
+
     for brief in _brief_needs_analysis():
         items.append({
             "level": "L1",

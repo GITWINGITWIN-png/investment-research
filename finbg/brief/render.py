@@ -204,7 +204,8 @@ def render(pack: dict[str, Any]) -> str:
         f"date: {as_of}",
         "tags: [brief, situation, market]",
         f"generated_at: {pack.get('generated_at', '')}",
-        "analysis_status: pending",   # เปลี่ยนเป็น done เมื่อชั้นที่ 2 เติมแล้ว
+        # การตีความย้ายไปอยู่ในแผนรายสัปดาห์ (Journal/Plans) — brief รายวันเป็นข้อเท็จจริงล้วน
+        "analysis: weekly-plan",
         "---",
         "",
         f"# 📊 Situation Brief — {as_of}",
@@ -370,32 +371,10 @@ def render(pack: dict[str, Any]) -> str:
         for hypothesis in backlog[:10]:
             out.append(f"- [[{hypothesis['file']}|{hypothesis['title']}]]")
 
-    # --- ช่องให้ชั้นที่ 2 เติม ---
+    # --- Portfolio Manager: แผน + ผลงาน + แจ้งเตือน + คำทำนาย ---
+    out.extend(["", "---", ""])
+    out.extend(_pm_section(pack.get("pm") or {}))
     out.extend([
-        "",
-        "---",
-        "",
-        "## 🧠 การวิเคราะห์",
-        "",
-        "> [!tip] ส่วนนี้เว้นไว้ให้เติมด้วย Claude",
-        "> เปิด Claude Code แล้วสั่ง:",
-        "> ```",
-        f"> อ่าน data/derived/context/{as_of}.json แล้วเติมหัวข้อ 'การวิเคราะห์'",
-        f"> ใน Journal/Briefs/{as_of}.md",
-        "> ```",
-        "> แล้วเปลี่ยน `analysis_status` ใน frontmatter เป็น `done`",
-        "",
-        "<!-- ANALYSIS:START -->",
-        "*(ยังไม่ได้วิเคราะห์)*",
-        "<!-- ANALYSIS:END -->",
-        "",
-        "---",
-        "",
-        "## ✍️ คำทำนายประจำสัปดาห์",
-        "",
-        "> [!important] อย่าข้ามขั้นนี้",
-        "> การเขียนคำทำนาย **ก่อน** รู้ผล คือการประเมินแบบเดียวที่ไม่มีทางปนเปื้อน",
-        "> สร้างไฟล์ใหม่ด้วย `uv run finbg predict \"หัวข้อ\"`",
         "",
         "---",
         "",
@@ -404,6 +383,42 @@ def render(pack: dict[str, Any]) -> str:
     ])
 
     return "\n".join(out)
+
+
+def _pm_section(pm: dict[str, Any]) -> list[str]:
+    """สรุปพอร์ต PM ในหน้า brief — รายละเอียดเต็มอยู่ในหน้าแผน"""
+    from ..pm import plans as plans_module
+
+    lines = ["## 🧭 แผนรายสัปดาห์ที่ใช้อยู่", ""]
+    plan = pm.get("plan")
+    if not plan:
+        lines += [
+            "*ยังไม่มีแผน — แผนแรกออกอัตโนมัติเช้าวันเสาร์ (หรือสั่งเอง `uv run finbg plan run`)*",
+        ]
+    else:
+        icon = {"risk_on": "🟢", "neutral": "⚪", "risk_off": "🔴"}.get(plan.get("stance"), "⚪")
+        satellite = ", ".join(f"{t} {w:.0%}" for t, w in plan["satellite"].items())
+        cash = f", เงินสด {plan['cash']:.0%}" if plan.get("cash") else ""
+        lines += [
+            f"**[[{plan['plan_id']}]]** {icon} `{plan.get('stance')}` · satellite: {satellite}{cash}",
+            "",
+            f"> {plan.get('thesis', '')[:500]}",
+        ]
+    lines += ["", *plans_module.status_lines(pm.get("status") or {})]
+
+    alerts = pm.get("alerts_7d") or []
+    lines += ["", "### 🚨 แจ้งเตือน 7 วันล่าสุด", ""]
+    icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "info": "⚪"}
+    lines += [f"- {icon.get(a['severity'], '·')} {a['at'][:16]} UTC — {a['title']}" for a in alerts] or ["*ไม่มี*"]
+
+    card = pm.get("scorecard") or {}
+    lines += ["", "### 🎯 คำทำนายของ PM (ระบบตัดสินเองด้วยราคา)", ""]
+    if card.get("n"):
+        lines.append(f"ตัดสินแล้ว {card['n']} ข้อ · ถูก {card['hit_rate_pct']}% · มั่นใจเฉลี่ย "
+                     f"{card['avg_confidence_pct']}% · Brier {card['brier']} (ต่ำกว่า 0.25 = ดีกว่าเดาสุ่ม)")
+    else:
+        lines.append("*ยังไม่มีข้อที่ครบกำหนด*")
+    return lines
 
 
 def build_brief() -> dict[str, Any]:

@@ -274,6 +274,40 @@ def _journal_block() -> dict[str, Any]:
     }
 
 
+def _pm_block() -> dict[str, Any]:
+    """สถานะ Portfolio Manager: แผนที่ใช้อยู่ ผลงานเทียบ control แจ้งเตือนล่าสุด คำทำนาย"""
+    from datetime import timedelta
+
+    from ..pm import plans as plans_module
+    from ..pm import portfolio as pm_portfolio
+    from ..pm import predictions as pm_predictions
+
+    record = plans_module.latest()
+    block: dict[str, Any] = {"status": pm_portfolio.build(), "scorecard": pm_predictions.scorecard(limit=5)}
+    if record:
+        block["plan"] = {
+            "plan_id": record["plan_id"],
+            "kind": record["kind"],
+            "created_at": record["created_at"],
+            "stance": record["plan"].get("regime", {}).get("stance"),
+            "thesis": record["plan"].get("thesis", ""),
+            "satellite": record["targets"]["satellite"],
+            "cash": record["targets"]["cash"],
+        }
+    cutoff = (storage.utc_now() - timedelta(days=7)).isoformat()
+    alerts = []
+    for path in sorted(config.ALERTS.glob("alerts-*.jsonl"))[-2:]:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                alert = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if alert.get("at", "") >= cutoff:
+                alerts.append({k: alert.get(k) for k in ("at", "severity", "title", "detail")})
+    block["alerts_7d"] = alerts[-15:]
+    return block
+
+
 def _fundamentals_block() -> dict[str, Any]:
     """ตัวเลขงบล่าสุดต่อบริษัท (SEC XBRL) — ราคาที่ใช้คิด P/E คือราคาปิดล่าสุด"""
     closes = storage.price_matrix("close")
@@ -322,6 +356,7 @@ def build() -> dict[str, Any]:
         "journal": _journal_block(),
         "fundamentals": _fundamentals_block(),
         "earnings_upcoming": calendar_module.upcoming(days=14),
+        "pm": _pm_block(),
     }
 
     out_dir = config.DERIVED / "context"
