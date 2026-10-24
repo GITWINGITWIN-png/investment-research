@@ -81,11 +81,15 @@ def render(record: dict[str, Any], status: dict[str, Any] | None = None) -> Path
     sleeve = 1.0 - config.PM_CORE_WEIGHT
 
     def evidence_links(items: list[str]) -> str:
-        links = []
-        for item in items:
-            ref = refs.get(item.strip())
-            links.append(f"[{item.strip()}]({ref['url']})" if ref and ref.get("url") else item)
-        return " · ".join(links) if links else "—"
+        """แปลง ID ข่าว (N12) ในหลักฐานเป็นลิงก์ — ข้อความอื่นคงไว้ตามเดิม"""
+        import re
+
+        def link(match: re.Match[str]) -> str:
+            ref = refs.get(match.group(0))
+            return f"[{match.group(0)}]({ref['url']})" if ref and ref.get("url") else match.group(0)
+
+        rendered = [re.sub(r"\bN\d{1,4}\b", link, item.strip()) for item in items]
+        return " · ".join(rendered) if rendered else "—"
 
     regime = plan.get("regime", {})
     stance_icon = {"risk_on": "🟢", "neutral": "⚪", "risk_off": "🔴"}.get(regime.get("stance"), "⚪")

@@ -59,7 +59,9 @@ def _alert(key: str, severity: str, title: str, detail: str, tickers: list[str],
 
 # --- ราคา --------------------------------------------------------------------
 
-def check_prices(satellite: dict[str, float], triggers: list[dict[str, Any]], plan_id: str | None) -> list[dict[str, Any]]:
+def check_prices(satellite: dict[str, float], triggers: list[dict[str, Any]], plan_id: str | None,
+                 known_through: str | None = None) -> list[dict[str, Any]]:
+    """`known_through` = วันที่ราคาล่าสุดที่แผนปัจจุบันเห็นแล้ว — แท่งก่อนหน้านั้นไม่นับเป็นเหตุการณ์ใหม่"""
     import yfinance as yf
 
     watch = sorted(set(satellite) | {"SPY", "^VIX"} | {t["ticker"] for t in triggers})
@@ -80,6 +82,8 @@ def check_prices(satellite: dict[str, float], triggers: list[dict[str, Any]], pl
         sigma = float(series.pct_change().iloc[-61:-1].std() * 100)
         z = move / sigma if sigma > 0 else 0.0
         day = series.index[-1].date().isoformat()
+        if known_through and day <= known_through:
+            continue                      # แผนปัจจุบันเห็นแท่งนี้แล้ว — ไม่ใช่ข่าวใหม่สำหรับมัน
 
         if ticker == "^VIX":
             if last >= config.ALERT_VIX_LEVEL or move >= config.ALERT_VIX_JUMP:
@@ -211,10 +215,17 @@ def run(dry_run: bool = False, escalate: bool = True) -> dict[str, Any]:
     held = set(satellite)
     stocks = [t for t in satellite if mandate.kind_of(t) == "stock"]
 
+    # เหตุการณ์ที่เกิดก่อนแผนปัจจุบันออก แผนเห็นไปแล้ว — ไม่ต้องปลุกให้วางแผนใหม่เพราะเรื่องเดิม
+    known_through = (record or {}).get("information", {}).get("prices_as_of")
+    plan_created = (record or {}).get("created_at")
+    if plan_created:
+        state["sec_since"] = max(filter(None, [state.get("sec_since"), plan_created]))
+        state["labels_since"] = max(filter(None, [state.get("labels_since"), plan_created]))
+
     found: list[dict[str, Any]] = []
     errors: list[str] = []
     for name, check in (
-        ("prices", lambda: check_prices(satellite, triggers, plan_id)),
+        ("prices", lambda: check_prices(satellite, triggers, plan_id, known_through)),
         ("sec", lambda: check_sec(stocks, state.get("sec_since"))),
         ("labels", lambda: check_labels(held, state.get("labels_since"))),
     ):

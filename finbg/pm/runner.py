@@ -71,6 +71,16 @@ def replan_allowed(now: datetime | None = None) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _code_version() -> str:
+    import subprocess
+
+    try:
+        return subprocess.run(["git", "-C", str(config.ROOT), "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True, timeout=5).stdout.strip() or "?"
+    except (OSError, subprocess.SubprocessError):
+        return "?"
+
+
 def _feedback(errors: list[str]) -> str:
     return "\n".join([
         "",
@@ -162,7 +172,8 @@ def run(kind: str = "weekly", *, force: bool = False, dry_run: bool = False,
     if late:
         warnings.append("แผนสาย — ออกหลังวันจันทร์ของสัปดาห์ (เครื่องปิดช่วงออกแผน)")
 
-    cited = {e.strip() for p in output.get("positions") or [] for e in p.get("evidence") or []}
+    # ID ข่าวที่ถูกอ้างที่ไหนก็ได้ในแผน (evidence, thesis, เหตุผลของการเปลี่ยน) → เก็บลิงก์ไว้กับแผน
+    cited = set(schema.NEWS_ID.findall(__import__("json").dumps(output, ensure_ascii=False)))
     record = {
         "schema_version": schema.SCHEMA_VERSION,
         "plan_id": plan_id,
@@ -173,6 +184,8 @@ def run(kind: str = "weekly", *, force: bool = False, dry_run: bool = False,
         "information": {"prices_as_of": meta["prices_as_of"], "today": meta["today"]},
         "model_used": result.get("model_used"),
         "model_expected": config.PLAN_MODEL,
+        # เวอร์ชันโค้ด/พรอมต์/กรอบที่ใช้ออกแผนนี้ — แก้กติกาเมื่อไหร่ ผลงานต้องแยกนับตามเวอร์ชัน
+        "code_version": _code_version(),
         "effort": config.PLAN_EFFORT,
         "request_file": str(request_path.relative_to(config.ROOT)),
         "trigger": trigger,
