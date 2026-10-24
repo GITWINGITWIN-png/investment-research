@@ -66,7 +66,7 @@ timeout "${TIMEOUT_SEC}" claude -p "$(cat "${PROJECT_DIR}/scripts/loop-prompt-he
     --model "${MODEL}" \
     --settings "${PROJECT_DIR}/scripts/label-loop-settings.json" \
     --output-format json \
-    > "${AUDIT_FILE}" 2>>"${LOG_FILE}"
+    < /dev/null > "${AUDIT_FILE}" 2>>"${LOG_FILE}"
 STATUS=$?
 
 if [[ ${STATUS} -eq 124 ]]; then
