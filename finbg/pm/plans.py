@@ -29,7 +29,7 @@ def save(record: dict[str, Any]) -> Path:
     if path.exists():
         raise FileExistsError(f"มีแผน {record['plan_id']} อยู่แล้ว — แผนแก้ไม่ได้ ให้ออก replan แทน")
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-    storage.log_manifest("plan", path, 1, plan_id=record["plan_id"], kind=record["kind"])
+    storage.log_manifest("plan", path, 1, plan_id=record["plan_id"], plan_kind=record["kind"])
     return path
 
 
