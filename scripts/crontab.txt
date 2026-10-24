@@ -6,5 +6,6 @@
 5 5-23 * * * /usr/sbin/anacron -s -t /home/you/investment-research/scripts/anacrontab -S /home/you/.local/state/finbg/anacron
 @reboot sleep 120; [ "$(date +\%H)" -ge 5 ] && /usr/sbin/anacron -s -t /home/you/investment-research/scripts/anacrontab -S /home/you/.local/state/finbg/anacron
 
-# เฝ้าข่าว/ราคาแรงทุกชั่วโมง (0 token จนกว่าจะเจอเรื่องใหญ่) — นาทีที่ 35 ไม่ชนกับ anacron
-35 * * * * /home/you/investment-research/scripts/watch.sh
+# ไม่มีงานรายชั่วโมงแล้ว (ผู้ใช้ขอ 2026-10-24) — การเฝ้าระวังอยู่ใน morning.sh:
+#   ทุกวัน   finbg volatility        หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ
+#   รายสัปดาห์ finbg watch --weekly   สรุป 8-K/ข่าวแรง/VIX ก่อนออกแผน

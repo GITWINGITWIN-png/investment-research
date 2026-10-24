@@ -22,6 +22,7 @@ from .pm import plans as plans_module
 from .pm import portfolio as pm_portfolio
 from .pm import predictions as pm_predictions
 from .pm import runner as pm_runner
+from .pm import volatility as pm_volatility
 from .pm import watch as pm_watch
 from .brief import context as context_module
 from .brief import render as render_module
@@ -323,9 +324,40 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0 if _print_result("predictions", pm_predictions.resolve_all()) else 1
 
 
+def cmd_volatility(args: argparse.Namespace) -> int:
+    """หุ้นที่จับตาผันผวนรุนแรง → Claude สืบสาเหตุ + ตัดสินใจ (morning.sh เรียกทุกวัน)"""
+    tickers = [t.strip().upper() for t in args.ticker.split(",")] if args.ticker else None
+    result = pm_volatility.run(dry_run=args.dry_run, replan=not args.no_replan, force_tickers=tickers)
+    stamp = storage.utc_now().astimezone(config.LOCAL_TZ).strftime("%Y-%m-%d %H:%M")
+    if not result.get("ok"):
+        print(f"❌ {stamp} {result.get('reason')}")
+        return 1
+    flagged = result.get("flagged") or []
+    print(f"🌪️  {stamp} ผันผวนรุนแรง {len(flagged)} ตัว" + (" (dry-run: ไม่เรียก Claude)" if args.dry_run else ""))
+    for line in flagged:
+        print(f"   · {line}")
+    if result.get("skipped"):
+        print(f"   ⏭️  {result['skipped']}")
+    if result.get("report"):
+        decisions = ", ".join(f"{t} → {d}" for t, d in result["decisions"].items())
+        print(f"   🔎 ผลสืบ: {decisions} · เทียบเท่า ${result.get('cost_usd') or 0:.2f}")
+        print(f"   📄 {result['report']}")
+    if result.get("replan"):
+        print(f"   🧭 วางแผนใหม่: {result['replan']}")
+    return 0
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
-    """เฝ้าระวังหนึ่งรอบ (cron เรียกทุกชั่วโมง)"""
+    """เฝ้าระวังหนึ่งรอบ — ปกติรันสัปดาห์ละครั้งก่อนออกแผน (--weekly)"""
+    if args.weekly:
+        is_due, reason = pm_watch.weekly_due()
+        if not is_due:
+            print(f"⏭️  {reason}")
+            return 0
+        print(f"🗓️  รอบสัปดาห์: {reason}")
     result = pm_watch.run(dry_run=args.dry_run, escalate=not args.no_replan)
+    if args.weekly and not args.dry_run:
+        pm_watch.mark_weekly()
     stamp = storage.utc_now().astimezone(config.LOCAL_TZ).strftime("%Y-%m-%d %H:%M")
     print(f"👁️  {stamp} ตรวจพบ {result['checked']} เหตุการณ์ · ใหม่ {result['new']}"
           + (" (dry-run: ไม่แจ้ง ไม่บันทึก)" if args.dry_run else ""))
@@ -480,10 +512,17 @@ def main(argv: list[str] | None = None) -> int:
     p_plan.add_argument("--reason", default=None, help="replan: เหตุผลที่วางแผนใหม่")
     p_plan.set_defaults(func=cmd_plan)
 
-    p_watch = sub.add_parser("watch", help="เฝ้าข่าว/ราคาแรง (cron เรียกทุกชั่วโมง)")
+    p_watch = sub.add_parser("watch", help="สรุป 8-K/ข่าวแรง/VIX (ปกติสัปดาห์ละครั้ง)")
     p_watch.add_argument("--dry-run", action="store_true", help="ตรวจอย่างเดียว ไม่แจ้ง ไม่บันทึก")
     p_watch.add_argument("--no-replan", action="store_true", help="แจ้งเตือนอย่างเดียว ไม่เรียก LLM วางแผนใหม่")
+    p_watch.add_argument("--weekly", action="store_true", help="รันเฉพาะเมื่อถึงรอบสัปดาห์ (ใช้ใน morning.sh)")
     p_watch.set_defaults(func=cmd_watch)
+
+    p_vol = sub.add_parser("volatility", help="หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (ทุกวัน)")
+    p_vol.add_argument("--dry-run", action="store_true", help="ดูว่าตัวไหนเข้าเกณฑ์ โดยไม่เรียก Claude")
+    p_vol.add_argument("--no-replan", action="store_true", help="สืบอย่างเดียว ไม่เรียก PM วางแผนใหม่")
+    p_vol.add_argument("--ticker", default=None, help="สั่งสืบเองเฉพาะตัว เช่น GE,META (ไม่สนเกณฑ์)")
+    p_vol.set_defaults(func=cmd_volatility)
 
     p_notify = sub.add_parser("notify", help="ตั้งค่า/ทดสอบการแจ้งเตือน")
     p_notify.add_argument("action", nargs="?", default="test", choices=["test", "setup"])

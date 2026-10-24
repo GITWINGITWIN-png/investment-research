@@ -1,6 +1,9 @@
 """เฝ้าระวังเหตุการณ์แรง — โค้ดตัดสินก่อน แล้วค่อยปลุก LLM เมื่อจำเป็น
 
-รันทุกชั่วโมงจาก cron (scripts/watch.sh) ใช้ token เป็นศูนย์จนกว่าจะเจอเรื่องใหญ่จริง
+รอบปกติ: **สัปดาห์ละครั้ง** ก่อนออกแผนรายสัปดาห์ (morning.sh เรียก `finbg watch --weekly`)
+เดิมรันทุกชั่วโมง — ผู้ใช้เห็นว่าถี่เกิน (2026-10-24) ส่วนที่ต้องเร็วจริง (ราคาผันผวนรุนแรง
+และ trigger ของแผน) ย้ายไปอยู่ที่ volatility.py ซึ่งรันทุกวันหลังเก็บข้อมูล
+ไฟล์นี้จึงเหลือหน้าที่สรุป 8-K / ข่าวแรง / VIX ประจำสัปดาห์ให้แผนได้อ่าน
 
 ## สิ่งที่เฝ้า (ทั้งหมดเป็นกฎในโค้ด ตรวจสอบได้)
 
@@ -204,6 +207,25 @@ def _record(alerts: list[dict[str, Any]]) -> None:
         lines.append(f"- {icon.get(alert['severity'], '·')} **{local}** {alert['title']} — {alert['detail']}")
     with page.open("a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
+
+
+def weekly_due() -> tuple[bool, str]:
+    """รอบสัปดาห์: ถึงเวลาออกแผนรายสัปดาห์ หรือไม่ได้ตรวจมาเกิน 7 วัน"""
+    from . import runner
+
+    state = _load_state()
+    last = state.get("weekly_last")
+    if runner.due()["due"]:
+        return True, "ก่อนออกแผนรายสัปดาห์"
+    if last is None or storage.utc_now() - datetime.fromisoformat(last) > timedelta(days=7):
+        return True, "ไม่ได้ตรวจมาเกิน 7 วัน"
+    return False, f"ตรวจรอบสัปดาห์ไปแล้วเมื่อ {last[:16]} UTC"
+
+
+def mark_weekly() -> None:
+    state = _load_state()
+    state["weekly_last"] = storage.utc_stamp()
+    _save_state(state)
 
 
 def run(dry_run: bool = False, escalate: bool = True) -> dict[str, Any]:

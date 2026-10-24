@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # งานประจำวัน — anacron เรียกวันละครั้ง ตอนเครื่องเปิดครั้งแรกของวัน (ดู scripts/anacrontab)
 #
-# ลำดับ: เก็บข้อมูล → label ข่าว → แผนรายสัปดาห์ (ถ้าถึงเวลา — ปกติคือเช้าวันเสาร์)
+# ลำดับ: เก็บข้อมูล → label ข่าว → สืบหุ้นที่ผันผวนรุนแรง (ถ้ามี)
+#       → สรุป 8-K/ข่าวแรงประจำสัปดาห์ + แผนรายสัปดาห์ (เฉพาะวันออกแผน — ปกติคือเช้าวันเสาร์)
 #
 # ทำไมรวมเป็นสคริปต์เดียวแทน cron 06:00 + 06:30 แบบเดิม:
 # เดิมถ้าเครื่องปิดตอน 06:00 งานวันนั้นหายทั้งวัน (เกิดจริง 27 จาก 59 วันทำการ ส.ค.–ต.ค.)
@@ -19,8 +20,7 @@ export PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 mkdir -p "${LOG_DIR}"
 cd "${PROJECT_DIR}" || exit 1
 
-# ล็อกร่วมกับ watch.sh — กันสองงานแตะคลังพร้อมกัน
-# (เช่น watch สั่งวางแผนใหม่ ขณะที่แผนรายสัปดาห์กำลังออก)
+# ล็อกกันงานนี้ซ้อนกันเอง (เช่น เรียกมือระหว่างที่ anacron กำลังรัน)
 exec 9>"${PROJECT_DIR}/data/.finbg.lock"
 if ! flock -w 3600 9; then
     echo "$(date '+%F %T') รอล็อกเกิน 1 ชม. — ข้ามรอบนี้" >> "${LOG_FILE}"
@@ -39,18 +39,24 @@ DAILY=$?
 "${PROJECT_DIR}/scripts/label-auto.sh"
 LABEL=$?
 
-# แผนต้องใช้ข้อมูลสด — ถ้าเก็บข้อมูลไม่สำเร็จ ไม่ออกแผนจากข้อมูลเก่า (พรุ่งนี้ลองใหม่)
+# ขั้นที่ต้องใช้ข้อมูลสด — ถ้าเก็บข้อมูลไม่สำเร็จ ไม่ตัดสินใจจากข้อมูลเก่า (พรุ่งนี้ลองใหม่)
+VOL="skip"
 PLAN="skip"
 if [[ ${DAILY} -eq 0 ]]; then
     {
         echo "════════════════════════════════════════════════"
         echo "▶ เริ่ม $(date '+%Y-%m-%d %H:%M:%S %Z')"
     } >> "${PLAN_LOG}"
+    # ทุกวัน: หุ้นที่จับตาผันผวนรุนแรงไหม → ถ้าใช่ เรียก Claude สืบสาเหตุ (0 token ถ้าไม่มี)
+    uv run finbg volatility >> "${PLAN_LOG}" 2>&1
+    VOL=$?
+    # สัปดาห์ละครั้ง: สรุป 8-K/ข่าวแรง/VIX ให้แผนอ่าน (เดิมทุกชั่วโมง — ปรับตามที่ผู้ใช้ขอ 2026-10-24)
+    uv run finbg watch --weekly --no-replan >> "${PLAN_LOG}" 2>&1
     uv run finbg plan run >> "${PLAN_LOG}" 2>&1
     PLAN=$?
-    echo "◀ จบ $(date '+%H:%M:%S') · exit=${PLAN}" >> "${PLAN_LOG}"
+    echo "◀ จบ $(date '+%H:%M:%S') · volatility=${VOL} · plan=${PLAN}" >> "${PLAN_LOG}"
 fi
 
-echo "$(date '+%F %T') daily=${DAILY} label=${LABEL} plan=${PLAN}" >> "${LOG_FILE}"
+echo "$(date '+%F %T') daily=${DAILY} label=${LABEL} volatility=${VOL} plan=${PLAN}" >> "${LOG_FILE}"
 find "${LOG_DIR}" -maxdepth 1 -name 'plan-*.log' -mtime +365 -delete 2>/dev/null
 [[ ${DAILY} -eq 0 ]] && exit 0 || exit "${DAILY}"

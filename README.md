@@ -1,13 +1,13 @@
 # finbg — ระบบวิจัยการลงทุนอัตโนมัติ
 
-ระบบเก็บข้อมูล → ให้ LLM วางแผนการลงทุนรายสัปดาห์ → รันแผนบนพอร์ตกระดาษ → เฝ้าข่าวแรงทุกชั่วโมง
+ระบบเก็บข้อมูล → ให้ LLM วางแผนการลงทุนรายสัปดาห์ → รันแผนบนพอร์ตกระดาษ → สืบสาเหตุทุกครั้งที่หุ้นที่จับตาผันผวนรุนแรง
 และ harness สำหรับทดสอบ algo กับข้อมูลย้อนหลังแบบไม่หลอกตัวเอง
 
 | ส่วน | ทำอะไร | อ่านเพิ่ม |
 |---|---|---|
 | **ข้อมูล** (`finbg/collect`) | ราคา 10 ปี · ข่าว 4 แหล่ง + label · งบ SEC XBRL · ปฏิทินงบ | [10 - Background Track](AI-Investing-Research/10%20-%20Background%20Track.md) |
 | **Portfolio Manager** (`finbg/pm`) | LLM เขียนแผนสัปดาห์ละครั้ง โค้ดตรวจกฎและรันบนพอร์ตกระดาษ เทียบ control | [11 - Weekly Portfolio Manager](AI-Investing-Research/11%20-%20Weekly%20Portfolio%20Manager.md) |
-| **เฝ้าระวัง** (`finbg/pm/watch.py`) | กฎในโค้ดจับ 8-K/ราคาช็อก/VIX/ข่าวแรง → แจ้งเตือน → วางแผนใหม่ | โน้ต 11 |
+| **เฝ้าระวัง** (`finbg/pm/volatility.py`, `watch.py`) | ทุกวัน: หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ + ตัดสินใจ · ทุกสัปดาห์: สรุป 8-K/ข่าวแรง/VIX | โน้ต 11 |
 | **Harness** (`finlab`) | IC/ICIR, walk-forward, purged CV, Deflated Sharpe, PBO — ผ่านประตู 1 แล้ว | [09 - Evaluation Playbook](AI-Investing-Research/09%20-%20Evaluation%20Playbook.md) |
 
 ---
@@ -45,7 +45,9 @@ uv run finbg plan status        # แผนปัจจุบัน + ผลง�
 uv run finbg plan run           # ออกแผนรายสัปดาห์ (ปกติออกเองเช้าวันเสาร์)
 uv run finbg plan run --dry-run # ดูพรอมต์ที่ PM จะได้อ่าน โดยไม่เรียกโมเดล
 uv run finbg plan replan --reason "..."  # วางแผนใหม่เอง
-uv run finbg watch --dry-run    # ตอนนี้มีเหตุการณ์แรงอะไรบ้าง
+uv run finbg volatility --dry-run        # หุ้นตัวไหนผันผวนเข้าเกณฑ์ (ไม่เรียก Claude)
+uv run finbg volatility --ticker GE      # สั่ง Claude สืบสาเหตุเองเฉพาะตัว
+uv run finbg watch --dry-run    # สรุป 8-K/ข่าวแรง/VIX ตอนนี้
 uv run finbg notify setup       # (เลือกเปิด) แจ้งเตือนบนมือถือผ่าน ntfy
 
 uv run finlab gate              # ตรวจ harness: ปฏิเสธ factor ปลอมได้ไหม
@@ -81,8 +83,8 @@ cd docs && xelatex guide.tex && xelatex guide.tex   # คอมไพล์ (ร
 ครั้งแรกที่เครื่องเปิดของวัน (anacron)  →  scripts/morning.sh
     daily.sh       เก็บราคา + ข่าว + ปฏิทินงบ + งบ (ถ้าถึงรอบ) + ledger + brief
     label-auto.sh  มีข่าวรอไหม? (0 token) → ถ้ามี เปิด claude -p แบบ headless
-    finbg plan run แผนรายสัปดาห์ (เฉพาะเมื่อถึงเวลา — ปกติคือเช้าวันเสาร์)
-ทุกชั่วโมง  →  scripts/watch.sh   เฝ้าข่าว/ราคาแรง (0 token จนกว่าจะเจอเรื่องใหญ่)
+    finbg volatility   หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (0 token ถ้าไม่มี)
+    finbg watch --weekly + finbg plan run   เฉพาะวันออกแผน (ปกติคือเช้าวันเสาร์)
 ```
 
 ปิด Claude Code ปิดหน้าจอได้ตามปกติ — cron ของระบบเป็นคนเรียก ไม่ผูกกับ session ใด
@@ -159,7 +161,7 @@ uv run finbg queue      # เรียงให้แล้ว ⏳ = เน่�
 | ความถี่ | ทำอะไร | token |
 |---------|--------|-------|
 | ทุกวัน (อัตโนมัติ) | เก็บข้อมูล + label ข่าว (L2) + พอร์ต PM + ตัดสินคำทำนาย | น้อย (label ~$0.5 เทียบเท่า) |
-| ทุกชั่วโมง (อัตโนมัติ) | เฝ้าระวัง — เรียก LLM เฉพาะเมื่อเจอเหตุการณ์ high/critical | 0 ส่วนใหญ่ |
+| ทุกวัน (อัตโนมัติ) | หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (~2–3 ครั้ง/เดือน) | ~$0.2/ครั้ง เทียบเท่า |
 | ทุกสัปดาห์ (อัตโนมัติ) | แผนรายสัปดาห์ของ PM (L1) — เสาร์เช้า | กลาง (1 session) |
 | ทุกสัปดาห์ (คุณ) | อ่านแผนใน `Journal/Plans/` · ดูว่ามีอะไรค้านได้ไหม | 0 |
 | ทุกเดือน | ทดสอบ hypothesis 1 ใบด้วย `finlab` (L3) | หลัก |
@@ -195,14 +197,13 @@ schema v1: `regime` · `novelty` · `topic` + `topic_free` · `horizon` ·
 และ [`scripts/anacrontab`](scripts/anacrontab)
 
 ```cron
-5 5-23 * * *  anacron -s -t scripts/anacrontab ...   # ทุกชั่วโมง 05:05–23:05
+5 5-23 * * *  anacron -s -t scripts/anacrontab ...   # เช็กทุกชั่วโมง 05:05–23:05 ว่างานวันนี้รันหรือยัง (รันจริงวันละครั้ง)
 @reboot       sleep 120; anacron ...                 # ตอนบูต (ถ้าหลัง 05:00)
-35 * * * *    scripts/watch.sh                       # เฝ้าระวังทุกชั่วโมง
 ```
 
 | งานใน anacron | รอบ | ทำอะไร |
 |---|---|---|
-| `finbg-morning` | ทุกวัน | `scripts/morning.sh` (เก็บข้อมูล → label → แผนถ้าถึงเวลา) |
+| `finbg-morning` | ทุกวัน | `scripts/morning.sh` (เก็บข้อมูล → label → สืบหุ้นผันผวน → สรุปรายสัปดาห์ + แผนถ้าถึงเวลา) |
 | `finbg-backup` | ทุก 7 วัน | `scripts/backup.sh` |
 
 ไม่เรียก anacron ช่วง 00:00–04:59 เพราะเป็นช่วงที่ตลาดสหรัฐยังเปิด (ข้อมูลวันนั้นยังไม่ครบ)
@@ -213,7 +214,6 @@ schema v1: `regime` · `novelty` · `topic` + `topic_free` · `horizon` ·
 ```bash
 tail -5 data/logs/morning-$(date +%Y-%m).log    # daily=0 label=0 plan=0|skip
 tail -20 data/logs/plan-$(date +%Y-%m).log
-tail -20 data/logs/watch-$(date +%Y-%m).log
 ```
 
 ---
@@ -241,7 +241,8 @@ finbg/
     runner.py        ถึงเวลาไหม → เรียก → ตรวจ → เก็บ → แจ้ง
     portfolio.py     พอร์ตกระดาษ llm_pm vs pm_control
     predictions.py   ตัดสินคำทำนายด้วยราคา + calibration
-    watch.py         เฝ้าระวังรายชั่วโมง
+    volatility.py    ทุกวัน: หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ + ตัดสินใจ
+    watch.py         ทุกสัปดาห์: สรุป 8-K/ข่าวแรง/VIX ก่อนออกแผน
   brief/
     context.py       สร้าง context pack (JSON) — ไม่เรียก LLM
     render.py        แปลงเป็น Markdown สำหรับ Obsidian
@@ -257,6 +258,7 @@ data/
   labels/                  label ข่าว (สร้างย้อนหลังไม่ได้)
   plans/                   แผนที่ผ่านการตรวจ + requests/ (พรอมต์จริง) + resolutions.jsonl
   alerts/                  ประวัติการแจ้งเตือน
+  investigations/          ผลสืบเหตุการณ์ผันผวน + ข้อมูลที่ Claude ได้อ่าน
   research/                ราคาของ universe วิจัย + experiments.jsonl (ดาวน์โหลดใหม่ได้)
   derived/                 คำนวณใหม่ได้เสมอ ลบทิ้งได้ (รวม pm_ledger.parquet)
   logs/                    log ของงานอัตโนมัติ
@@ -265,6 +267,7 @@ Journal/                   โฟลเดอร์ที่ Obsidian อ่า�
   Briefs/                  situation brief รายวัน
   Plans/                   แผนรายสัปดาห์ของ PM
   Alerts/                  การแจ้งเตือนรายวัน
+  Investigations/          ผลสืบเหตุการณ์ผันผวน
   Research/                ผลจาก harness
   Predictions/             คำทำนาย (BG-1)
   Hypotheses/              สมมติฐานรอทดสอบ (BG-4)
@@ -346,6 +349,7 @@ uv run finbg news --sources yahoo,rss,sec    # ข้าม gdelt
 | `data/labels/` | label ที่ทำย้อนหลัง = ปนเปื้อน hindsight |
 | `data/plans/` | แผนรายสัปดาห์ + พรอมต์ที่ใช้จริง + ผลคำทำนาย = track record ของ PM |
 | `data/alerts/` | ประวัติการแจ้งเตือน (เหตุผลของทุก replan) |
+| `data/investigations/` | ผลสืบเหตุการณ์ผันผวน + ข้อมูลที่ Claude ได้อ่าน |
 | `Journal/` | คำทำนาย บทวิเคราะห์ สมมติฐาน — งานสมองล้วน |
 
 ไม่สำรอง `data/derived/` เพราะคำนวณใหม่ได้จาก raw เสมอ

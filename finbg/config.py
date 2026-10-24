@@ -488,6 +488,23 @@ ALERT_VIX_LEVEL = 30.0
 ALERT_VIX_JUMP = 30.0                                  # VIX พุ่งเกินนี้ (%) ในวันเดียว
 ALERT_LABEL_MATERIALITY = 75                           # label ข่าวที่ถือว่า "แรง"
 
+# --- ความผันผวนรุนแรง → เรียก Claude มาสืบสาเหตุ (finbg/pm/volatility.py) ---------
+# รันวันละครั้งหลังเก็บข้อมูล (morning.sh) · 0 token ถ้าไม่มีอะไรผิดปกติ
+# z = ผลตอบแทน / ความผันผวนปกติ — ความผันผวนปกติคิดจาก 120 วันทำการ "ก่อน" ช่วงเหตุการณ์
+# (ตัด 5 วันล่าสุดออก ไม่ให้เหตุการณ์ไปเพิ่มฐานของตัวเองจนดูไม่ผิดปกติ)
+# ต้องผ่านทั้ง z และ % ขั้นต่ำ: หุ้นนิ่งมาก (เช่น KO) แกว่ง 2% ก็ได้ z สูง แต่ไม่ใช่เรื่องรุนแรง
+VOL_LOOKBACK = 120
+VOL_DAILY_Z = 3.5
+VOL_DAILY_MIN_MOVE = {"stock": 5.0, "etf": 2.5}       # % ในวันเดียว
+VOL_WEEK_Z = 3.0
+VOL_WEEK_MIN_MOVE = {"stock": 10.0, "etf": 5.0}       # % สะสม 5 วันทำการ (จับการไหลลงต่อเนื่อง)
+VOL_COOLDOWN_SESSIONS = 5          # หุ้นตัวเดิมไม่สืบซ้ำภายในนี้ เว้นแต่มีวันที่แรงกว่าเดิม
+VOL_MAX_TICKERS = 6                # ต่อการสืบหนึ่งครั้ง (รวมเป็นเซสชันเดียว ประหยัดโควตา)
+VOL_MAX_SESSIONS_PER_WEEK = 4
+INVESTIGATIONS = DATA / "investigations"
+JOURNAL_INVESTIGATIONS = JOURNAL / "Investigations"
+INVESTIGATE_EFFORT = "high"
+
 # วางแผนใหม่อัตโนมัติเมื่อมี alert ระดับ critical/high — มีเพดานกันวนลูปเผาโควตา
 REPLAN_MAX_PER_WEEK = 2
 REPLAN_MIN_HOURS_APART = 12
