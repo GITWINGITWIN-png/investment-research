@@ -8,6 +8,7 @@
 | **ข้อมูล** (`finbg/collect`) | ราคา 10 ปี · ข่าว 4 แหล่ง + label · งบ SEC XBRL · ปฏิทินงบ | [10 - Background Track](AI-Investing-Research/10%20-%20Background%20Track.md) |
 | **Portfolio Manager** (`finbg/pm`) | LLM เขียนแผนสัปดาห์ละครั้ง โค้ดตรวจกฎและรันบนพอร์ตกระดาษ เทียบ control | [11 - Weekly Portfolio Manager](AI-Investing-Research/11%20-%20Weekly%20Portfolio%20Manager.md) |
 | **เฝ้าระวัง** (`finbg/pm/volatility.py`, `watch.py`) | ทุกวัน: หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ + ตัดสินใจ · ทุกสัปดาห์: สรุป 8-K/ข่าวแรง/VIX | โน้ต 11 |
+| **สแกนทั้งตลาด** (`finbg/scan`) | หุ้นสหรัฐ ~3,000 ตัว + filing ของ SEC ทั้งหมด → โค้ดคัด 30 → Sonnet คัด ≤ 5 → Opus ดำลึก → พอร์ตไอเดียเทียบกลุ่มสุ่ม | [12 - Opportunity Scanner](AI-Investing-Research/12%20-%20Opportunity%20Scanner.md) |
 | **Harness** (`finlab`) | IC/ICIR, walk-forward, purged CV, Deflated Sharpe, PBO — ผ่านประตู 1 แล้ว | [09 - Evaluation Playbook](AI-Investing-Research/09%20-%20Evaluation%20Playbook.md) |
 
 ---
@@ -50,6 +51,9 @@ uv run finbg volatility --ticker GE      # สั่ง Claude สืบสา�
 uv run finbg watch --dry-run    # สรุป 8-K/ข่าวแรง/VIX ตอนนี้
 uv run finbg notify setup       # (เลือกเปิด) แจ้งเตือนบนมือถือผ่าน ntfy
 
+uv run finbg scan --dry-run     # สแกนทั้งตลาด ดู 10 อันดับแรก ไม่เรียกโมเดล
+uv run finbg ideas              # พอร์ตไอเดีย: Claude vs สุ่ม vs ผู้เข้ารอบทั้งหมด
+
 uv run finlab gate              # ตรวจ harness: ปฏิเสธ factor ปลอมได้ไหม
 uv run finlab eval momentum_12_1
 
@@ -84,6 +88,7 @@ cd docs && xelatex guide.tex && xelatex guide.tex   # คอมไพล์ (ร
     daily.sh       เก็บราคา + ข่าว + ปฏิทินงบ + งบ (ถ้าถึงรอบ) + ledger + brief
     label-auto.sh  มีข่าวรอไหม? (0 token) → ถ้ามี เปิด claude -p แบบ headless
     finbg volatility   หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (0 token ถ้าไม่มี)
+    finbg scan         สแกนทั้งตลาด → ≤ 5 ไอเดีย/วัน เข้าพอร์ตไอเดีย (โน้ต 12)
     finbg watch --weekly + finbg plan run   เฉพาะวันออกแผน (ปกติคือเช้าวันเสาร์)
 ```
 
@@ -243,6 +248,16 @@ finbg/
     predictions.py   ตัดสินคำทำนายด้วยราคา + calibration
     volatility.py    ทุกวัน: หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ + ตัดสินใจ
     watch.py         ทุกสัปดาห์: สรุป 8-K/ข่าวแรง/VIX ก่อนออกแผน
+  scan/              สแกนทั้งตลาด — ดูโน้ต 12
+    universe.py      หุ้นทั้งตลาดจาก Nasdaq screener (snapshot รายวัน)
+    panel.py         ประวัติราคาของ universe กว้าง (ฐานของ "ผิดปกติ")
+    filings.py       SEC: index รายวัน · หัวข้อ 8-K · Form 4 · 13D · เนื้อข่าว 8-K
+    earnings.py      ปฏิทินงบทั้งตลาด + EPS จริง/คาด + จำนวนนักวิเคราะห์
+    score.py         ชั้น 1: คะแนนความผิดปกติ × ตัวคูณ "คนมองข้าม"
+    triage.py        ชั้น 2: Sonnet คัดกรอง
+    deepdive.py      ชั้น 3: Opus ดำลึก
+    book.py          พอร์ตไอเดีย + กลุ่มควบคุม + ผลจริง
+    runner.py        รวมทุกชั้น
   brief/
     context.py       สร้าง context pack (JSON) — ไม่เรียก LLM
     render.py        แปลงเป็น Markdown สำหรับ Obsidian
@@ -259,6 +274,8 @@ data/
   plans/                   แผนที่ผ่านการตรวจ + requests/ (พรอมต์จริง) + resolutions.jsonl
   alerts/                  ประวัติการแจ้งเตือน
   investigations/          ผลสืบเหตุการณ์ผันผวน + ข้อมูลที่ Claude ได้อ่าน
+  opportunities/           พอร์ตไอเดีย · กลุ่มควบคุม · ผลจริง · requests/ (ข้อความที่โมเดลได้อ่าน)
+  raw/screener/ · raw/sec_index/ · raw/sec_events/ · raw/insider/ · raw/earnings_calendar/   ข้อมูลดิบทั้งตลาด
   research/                ราคาของ universe วิจัย + experiments.jsonl (ดาวน์โหลดใหม่ได้)
   derived/                 คำนวณใหม่ได้เสมอ ลบทิ้งได้ (รวม pm_ledger.parquet)
   logs/                    log ของงานอัตโนมัติ
@@ -268,6 +285,7 @@ Journal/                   โฟลเดอร์ที่ Obsidian อ่า�
   Plans/                   แผนรายสัปดาห์ของ PM
   Alerts/                  การแจ้งเตือนรายวัน
   Investigations/          ผลสืบเหตุการณ์ผันผวน
+  Opportunities/           ผลสแกนรายวัน + scoreboard
   Research/                ผลจาก harness
   Predictions/             คำทำนาย (BG-1)
   Hypotheses/              สมมติฐานรอทดสอบ (BG-4)
@@ -350,6 +368,7 @@ uv run finbg news --sources yahoo,rss,sec    # ข้าม gdelt
 | `data/plans/` | แผนรายสัปดาห์ + พรอมต์ที่ใช้จริง + ผลคำทำนาย = track record ของ PM |
 | `data/alerts/` | ประวัติการแจ้งเตือน (เหตุผลของทุก replan) |
 | `data/investigations/` | ผลสืบเหตุการณ์ผันผวน + ข้อมูลที่ Claude ได้อ่าน |
+| `data/opportunities/` | พอร์ตไอเดีย + กลุ่มควบคุม + ผลจริง |
 | `Journal/` | คำทำนาย บทวิเคราะห์ สมมติฐาน — งานสมองล้วน |
 
 ไม่สำรอง `data/derived/` เพราะคำนวณใหม่ได้จาก raw เสมอ
