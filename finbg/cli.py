@@ -17,7 +17,12 @@ import sys
 import traceback
 from typing import Any
 
-from . import config, journal, labels, ledger, storage, workqueue
+from . import config, journal, labels, ledger, notify, storage, workqueue
+from .pm import plans as plans_module
+from .pm import portfolio as pm_portfolio
+from .pm import predictions as pm_predictions
+from .pm import runner as pm_runner
+from .pm import watch as pm_watch
 from .brief import context as context_module
 from .brief import render as render_module
 from .collect import calendar as calendar_module
@@ -251,6 +256,102 @@ def cmd_label(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pm_ledger_summary() -> dict[str, Any]:
+    """พอร์ต PM คำนวณใหม่ทุกวัน — คืนเฉพาะตัวเลขหลักให้ log อ่านง่าย"""
+    status = pm_portfolio.build()
+    if not status.get("ok"):
+        return status
+    if not status.get("started"):
+        return {"ok": True, "started": False, "pending": status.get("pending_plan") or "-"}
+    return {
+        "ok": True,
+        "llm_pm": f"{status['lines']['llm_pm']['return_pct']:+.2f}%",
+        "control": f"{status['lines']['pm_control']['return_pct']:+.2f}%",
+        "excess": f"{status['excess_vs_control_pct']:+.2f}",
+        "since": status["start"],
+    }
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    """แผนรายสัปดาห์ของ Portfolio Manager (ดูโน้ต 11)"""
+    if args.action == "status":
+        state = pm_runner.due()
+        current = plans_module.latest()
+        print(f"🧭 สัปดาห์เป้าหมาย {state['week']} — {state['reason']}")
+        if current:
+            sat = ", ".join(f"{t} {w:.0%}" for t, w in current["targets"]["satellite"].items())
+            print(f"   แผนล่าสุด {current['plan_id']} ({current['kind']}) ออก {current['created_at'][:16]} UTC")
+            print(f"   satellite: {sat}" + (f", cash {current['targets']['cash']:.0%}" if current["targets"]["cash"] else ""))
+        status = pm_portfolio.build()
+        for line in plans_module.status_lines(status):
+            if line:
+                print(f"   {line}")
+        card = pm_predictions.scorecard()
+        if card.get("n"):
+            print(f"   คำทำนาย: ถูก {card['hit_rate_pct']}% จาก {card['n']} ข้อ · Brier {card['brier']}")
+        return 0
+
+    if args.action in ("run", "replan"):
+        kind = "weekly" if args.action == "run" else "replan"
+        trigger = [args.reason] if args.reason else (["สั่งเองด้วย finbg plan replan"] if kind == "replan" else None)
+        print(f"🧭 {'ออกแผนรายสัปดาห์' if kind == 'weekly' else 'วางแผนใหม่'}...")
+        result = pm_runner.run(kind, force=args.force, dry_run=args.dry_run, trigger=trigger)
+        if result.get("skipped"):
+            print(f"  ⏭️  {result['reason']}")
+            return 0
+        if result.get("dry_run"):
+            print(f"  📝 พรอมต์ → {result['request']} ({result['chars']:,} ตัวอักษร · ข่าว {result['news_refs']} ชิ้น)")
+            return 0
+        if not result.get("ok"):
+            print(f"  ❌ {result.get('reason')}")
+            if result.get("failure"):
+                print(f"     รายละเอียด → {result['failure']}")
+            return 1
+        sat = ", ".join(f"{t} {w:.0%}" for t, w in result["satellite"].items())
+        print(f"  ✅ {result['plan_id']} ({result['stance']}) · satellite: {sat}"
+              + (f", cash {result['cash']:.0%}" if result["cash"] else "")
+              + f" · turnover {result['turnover']:.0%} · รอบที่ส่ง {result['attempts']}")
+        for warning in result.get("warnings") or []:
+            print(f"  ⚠️  {warning}")
+        print(f"  📄 {result['page']}")
+        return 0
+
+    if args.action == "ledger":
+        return 0 if _print_result("pm_ledger", _pm_ledger_summary()) else 1
+
+    # resolve
+    return 0 if _print_result("predictions", pm_predictions.resolve_all()) else 1
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    """เฝ้าระวังหนึ่งรอบ (cron เรียกทุกชั่วโมง)"""
+    result = pm_watch.run(dry_run=args.dry_run, escalate=not args.no_replan)
+    stamp = storage.utc_now().astimezone(config.LOCAL_TZ).strftime("%Y-%m-%d %H:%M")
+    print(f"👁️  {stamp} ตรวจพบ {result['checked']} เหตุการณ์ · ใหม่ {result['new']}"
+          + (" (dry-run: ไม่แจ้ง ไม่บันทึก)" if args.dry_run else ""))
+    for line in result["alerts"]:
+        print(f"   {line}")
+    for error in result["errors"]:
+        print(f"   ⚠️  {error}")
+    if result.get("replan"):
+        print(f"   🧭 วางแผนใหม่: {result['replan']}")
+    return 0
+
+
+def cmd_notify(args: argparse.Namespace) -> int:
+    if args.action == "setup":
+        result = notify.setup()
+        print("📱 ntfy " + ("สร้าง topic ใหม่แล้ว" if result["created"] else "ตั้งค่าไว้แล้ว"))
+        print(f"   topic : {result['topic']}")
+        print(f"   ติดตาม: ติดตั้งแอป ntfy บนมือถือ → Subscribe → ใส่ topic ข้างบน (server {result['server']})")
+        print(f"   ตั้งค่าเก็บที่ {config.NOTIFY_CONFIG} — ลบไฟล์นี้เพื่อปิด")
+        print("   ⚠️ ใครรู้ชื่อ topic อ่านข้อความได้ อย่าแชร์")
+        return 0
+    delivered = notify.send("🔔 finbg ทดสอบ", "ถ้าเห็นข้อความนี้ การแจ้งเตือนทำงานแล้ว", "info")
+    print("ส่งแล้ว: " + ", ".join(f"{k}={'✅' if v else '❌'}" for k, v in delivered.items()))
+    return 0
+
+
 def _fundamentals_if_due() -> dict[str, Any]:
     """งบเปลี่ยนรายไตรมาส — ดึงใหม่เฉพาะเมื่อเก่าเกินกำหนดหรือมี 10-Q/10-K ใหม่
 
@@ -281,6 +382,8 @@ def cmd_daily(args: argparse.Namespace) -> int:
         ("calendar", lambda: calendar_module.collect(), False),
         ("fundamentals", _fundamentals_if_due, False),
         ("ledger", lambda: ledger.rebuild(), True),
+        ("pm_ledger", _pm_ledger_summary, False),
+        ("predictions", lambda: pm_predictions.resolve_all(), False),
     ]
     if not args.skip_news:
         steps.insert(1, ("news", lambda: news_module.collect(), False))
@@ -368,6 +471,23 @@ def main(argv: list[str] | None = None) -> int:
                          help="ไม่กรอง — รวมข่าวสัญญาณต่ำด้วย (ปกติกรองเฉพาะ primary/ยืนยัน ticker)")
     p_label.add_argument("--file", default=None, help="ไฟล์คำตอบ (ปล่อยว่าง = ล่าสุด)")
     p_label.set_defaults(func=cmd_label)
+
+    p_plan = sub.add_parser("plan", help="แผนรายสัปดาห์ของ Portfolio Manager")
+    p_plan.add_argument("action", nargs="?", default="status",
+                        choices=["status", "run", "replan", "ledger", "resolve"])
+    p_plan.add_argument("--force", action="store_true", help="ออกแผนแม้ยังไม่ถึงเวลา/ชนเพดาน")
+    p_plan.add_argument("--dry-run", action="store_true", help="สร้างพรอมต์อย่างเดียว ไม่เรียกโมเดล")
+    p_plan.add_argument("--reason", default=None, help="replan: เหตุผลที่วางแผนใหม่")
+    p_plan.set_defaults(func=cmd_plan)
+
+    p_watch = sub.add_parser("watch", help="เฝ้าข่าว/ราคาแรง (cron เรียกทุกชั่วโมง)")
+    p_watch.add_argument("--dry-run", action="store_true", help="ตรวจอย่างเดียว ไม่แจ้ง ไม่บันทึก")
+    p_watch.add_argument("--no-replan", action="store_true", help="แจ้งเตือนอย่างเดียว ไม่เรียก LLM วางแผนใหม่")
+    p_watch.set_defaults(func=cmd_watch)
+
+    p_notify = sub.add_parser("notify", help="ตั้งค่า/ทดสอบการแจ้งเตือน")
+    p_notify.add_argument("action", nargs="?", default="test", choices=["test", "setup"])
+    p_notify.set_defaults(func=cmd_notify)
 
     p_daily = sub.add_parser("daily", help="งานประจำวัน (สำหรับ cron)")
     p_daily.add_argument("--skip-news", action="store_true", help="ข้ามข่าว (เร็วขึ้นมาก)")

@@ -1,0 +1,253 @@
+"""เฝ้าระวังเหตุการณ์แรง — โค้ดตัดสินก่อน แล้วค่อยปลุก LLM เมื่อจำเป็น
+
+รันทุกชั่วโมงจาก cron (scripts/watch.sh) ใช้ token เป็นศูนย์จนกว่าจะเจอเรื่องใหญ่จริง
+
+## สิ่งที่เฝ้า (ทั้งหมดเป็นกฎในโค้ด ตรวจสอบได้)
+
+| แหล่ง | เงื่อนไข | ระดับ |
+|---|---|---|
+| ราคาตัวที่ถือ | ขยับวันนี้ ≥ ALERT_SHOCK_Z เท่าของความผันผวนปกติ และ ≥ % ขั้นต่ำ | high (z ≥ 5 → critical) |
+| SPY | ขยับวันนี้ ≥ ALERT_MARKET_MOVE % | high (≥ 4% → critical) |
+| VIX | ระดับ ≥ ALERT_VIX_LEVEL หรือพุ่ง ≥ ALERT_VIX_JUMP % ในวันเดียว | high (≥ 40 → critical) |
+| trigger ในแผน | ราคาทะลุระดับที่ PM ตั้งไว้เอง | exit/reduce → high · review → medium |
+| 8-K ของหุ้นที่ถือ | Item ระดับ high/critical (ดู config.SEC_8K_ITEMS) | ตามหัวข้อ |
+| ข่าวที่ label แล้ว | materiality ≥ ALERT_LABEL_MATERIALITY และกระทบตัวที่ถือ | high |
+
+## ทำไมให้โค้ดเป็นด่านแรก
+
+ถ้าให้ LLM อ่านข่าวทุกชั่วโมงเพื่อหาเรื่องสำคัญ = เผาโควตา 24 ครั้ง/วัน และ LLM
+ไม่คงเส้นคงวา (วันนี้ว่าสำคัญ พรุ่งนี้ว่าไม่) กฎที่เขียนไว้ชัดทำงานเหมือนเดิมทุกครั้ง
+และ LLM ถูกเรียกเฉพาะตอนที่ต้องใช้วิจารณญาณจริง: "เหตุการณ์นี้เปลี่ยนแผนไหม"
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from datetime import datetime, timedelta
+from typing import Any
+
+import pandas as pd
+import requests
+
+from .. import config, labels as labels_module, notify, storage
+from ..collect.sources import sec as sec_source
+from . import mandate, plans as plans_module
+
+STATE_PATH = config.ALERTS / "state.json"
+ESCALATE = {"high", "critical"}
+
+
+def _load_state() -> dict[str, Any]:
+    try:
+        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"fired": {}, "sec_since": None, "labels_since": None}
+
+
+def _save_state(state: dict[str, Any]) -> None:
+    cutoff = (storage.utc_now() - timedelta(days=30)).isoformat()
+    state["fired"] = {k: v for k, v in state["fired"].items() if v >= cutoff}
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _alert(key: str, severity: str, title: str, detail: str, tickers: list[str], source: str) -> dict[str, Any]:
+    return {"key": key, "severity": severity, "title": title, "detail": detail,
+            "tickers": tickers, "source": source, "at": storage.utc_stamp()}
+
+
+# --- ราคา --------------------------------------------------------------------
+
+def check_prices(satellite: dict[str, float], triggers: list[dict[str, Any]], plan_id: str | None) -> list[dict[str, Any]]:
+    import yfinance as yf
+
+    watch = sorted(set(satellite) | {"SPY", "^VIX"} | {t["ticker"] for t in triggers})
+    raw = yf.download(watch, period="4mo", interval="1d", auto_adjust=False, progress=False, threads=True)
+    if raw.empty:
+        return []
+    closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]].rename(columns={"Close": watch[0]})
+    alerts: list[dict[str, Any]] = []
+
+    for ticker in watch:
+        if ticker not in closes.columns:
+            continue
+        series = closes[ticker].dropna()
+        if len(series) < 30:
+            continue
+        last, prev = float(series.iloc[-1]), float(series.iloc[-2])
+        move = (last / prev - 1.0) * 100
+        sigma = float(series.pct_change().iloc[-61:-1].std() * 100)
+        z = move / sigma if sigma > 0 else 0.0
+        day = series.index[-1].date().isoformat()
+
+        if ticker == "^VIX":
+            if last >= config.ALERT_VIX_LEVEL or move >= config.ALERT_VIX_JUMP:
+                severity = "critical" if last >= 40 else "high"
+                alerts.append(_alert(f"vix:{day}", severity, f"VIX {last:.1f} ({move:+.0f}% วันนี้)",
+                                     "ความกลัวในตลาดพุ่ง — ระบอบความผันผวนอาจเปลี่ยน", ["^VIX"], "price"))
+            continue
+        if ticker == "SPY" and abs(move) >= config.ALERT_MARKET_MOVE:
+            severity = "critical" if abs(move) >= 4 else "high"
+            alerts.append(_alert(f"market:{day}", severity, f"SPY {move:+.1f}% วันนี้ ({z:+.1f}σ)",
+                                 "ตลาดทั้งตลาดขยับแรงผิดปกติ", ["SPY"], "price"))
+        if ticker in satellite:
+            kind = "stock" if mandate.kind_of(ticker) == "stock" else "etf"
+            if abs(z) >= config.ALERT_SHOCK_Z and abs(move) >= config.ALERT_SHOCK_MIN_MOVE[kind]:
+                severity = "critical" if abs(z) >= 5 else "high"
+                share = satellite[ticker]
+                alerts.append(_alert(f"price:{ticker}:{day}", severity, f"{ticker} {move:+.1f}% ({z:+.1f}σ)",
+                                     f"ถืออยู่ {share:.0%} ของ satellite — ขยับแรงกว่าปกติมาก", [ticker], "price"))
+
+    for i, trigger in enumerate(triggers):
+        series = closes[trigger["ticker"]].dropna() if trigger["ticker"] in closes.columns else pd.Series(dtype=float)
+        if series.empty:
+            continue
+        last = float(series.iloc[-1])
+        crossed = last < trigger["level"] if trigger["kind"] == "close_below" else last > trigger["level"]
+        if crossed:
+            severity = "high" if trigger["action"] in ("exit", "reduce") else "medium"
+            alerts.append(_alert(
+                f"trigger:{plan_id}:{i}", severity,
+                f"{trigger['ticker']} ทะลุ trigger ({trigger['kind'].replace('_', ' ')} {trigger['level']:g})",
+                f"ราคาล่าสุด {last:.2f} · แผนตั้งไว้ว่า → {trigger['action']}: {trigger.get('why', '')}",
+                [trigger["ticker"]], "trigger",
+            ))
+    return alerts
+
+
+# --- SEC ---------------------------------------------------------------------
+
+def check_sec(stocks: list[str], since: str | None) -> tuple[list[dict[str, Any]], str]:
+    """8-K ใหม่ของหุ้นที่ถือ — เฉพาะ Item ระดับ high/critical"""
+    now = storage.utc_stamp()
+    since = since or (storage.utc_now() - timedelta(days=2)).isoformat()
+    cik_map = sec_source._ticker_to_cik()
+    alerts: list[dict[str, Any]] = []
+    for ticker in stocks:
+        cik = cik_map.get(ticker)
+        if not cik:
+            continue
+        try:
+            response = requests.get(sec_source.SUBMISSIONS_URL.format(cik=cik), headers=sec_source._headers(), timeout=30)
+            response.raise_for_status()
+            recent = response.json()["filings"]["recent"]
+        except (requests.RequestException, ValueError, KeyError):
+            continue
+        for i, form in enumerate(recent.get("form", [])):
+            accepted = sec_source._field(recent, "acceptanceDateTime", i).replace(".000Z", "+00:00")
+            if accepted and accepted < since:
+                break
+            if form != "8-K":
+                continue
+            items = [c.strip() for c in sec_source._field(recent, "items", i).split(",") if c.strip()]
+            severity = sec_source.item_severity(items)
+            if severity not in ESCALATE:
+                continue
+            names = " · ".join(f"{c} {config.SEC_8K_ITEMS.get(c, ('?', ''))[0]}" for c in items)
+            accession = recent["accessionNumber"][i]
+            alerts.append(_alert(f"sec:{accession}", severity, f"{ticker} ยื่น 8-K: {names}",
+                                 f"SEC รับเอกสาร {accepted[:16]} UTC · accession {accession}", [ticker], "sec"))
+        time.sleep(config.SEC_MIN_INTERVAL_SEC)
+    return alerts, now
+
+
+# --- ข่าวที่ label แล้ว ----------------------------------------------------------
+
+def check_labels(held: set[str], since: str | None) -> tuple[list[dict[str, Any]], str]:
+    now = storage.utc_stamp()
+    since = since or (storage.utc_now() - timedelta(days=1)).isoformat()
+    titles: dict[str, str] = {}
+    alerts: list[dict[str, Any]] = []
+    for path in sorted((config.DATA / "labels").glob("*.jsonl")):
+        if path.stem < since[:10]:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                label = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if label.get("labeled_at", "") < since or (label.get("materiality") or 0) < config.ALERT_LABEL_MATERIALITY:
+                continue
+            touched = sorted({e.get("ticker") for e in label.get("entities") or []} & held)
+            if not touched:
+                continue
+            if not titles:
+                titles = {r["url"]: r["title"] for r in labels_module._candidates(False)}
+            alerts.append(_alert(
+                f"label:{label['url']}", "high",
+                f"ข่าวแรงกระทบ {', '.join(touched)} (materiality {label['materiality']})",
+                f"{titles.get(label['url'], label.get('topic_free', ''))[:160]} — {label.get('rationale', '')}",
+                touched, "label",
+            ))
+    return alerts, now
+
+
+# --- บันทึก + แจ้ง + วางแผนใหม่ ---------------------------------------------------
+
+def _record(alerts: list[dict[str, Any]]) -> None:
+    storage.ensure_dirs()
+    month = storage.utc_now().strftime("%Y-%m")
+    with (config.ALERTS / f"alerts-{month}.jsonl").open("a", encoding="utf-8") as fh:
+        for alert in alerts:
+            fh.write(json.dumps(alert, ensure_ascii=False) + "\n")
+    day = datetime.now(tz=config.LOCAL_TZ).strftime("%Y-%m-%d")
+    page = config.JOURNAL_ALERTS / f"{day}.md"
+    lines = [] if page.exists() else [f"# 🚨 การแจ้งเตือน {day}", ""]
+    icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "info": "⚪"}
+    for alert in alerts:
+        local = datetime.fromisoformat(alert["at"]).astimezone(config.LOCAL_TZ).strftime("%H:%M")
+        lines.append(f"- {icon.get(alert['severity'], '·')} **{local}** {alert['title']} — {alert['detail']}")
+    with page.open("a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def run(dry_run: bool = False, escalate: bool = True) -> dict[str, Any]:
+    """ตรวจหนึ่งรอบ คืนสรุป — dry_run = ตรวจอย่างเดียว ไม่แจ้ง ไม่บันทึก ไม่วางแผนใหม่"""
+    state = _load_state()
+    satellite, _, plan_id = plans_module.current_targets()
+    record = plans_module.latest()
+    triggers = (record or {}).get("targets", {}).get("triggers") or []
+    held = set(satellite)
+    stocks = [t for t in satellite if mandate.kind_of(t) == "stock"]
+
+    found: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for name, check in (
+        ("prices", lambda: check_prices(satellite, triggers, plan_id)),
+        ("sec", lambda: check_sec(stocks, state.get("sec_since"))),
+        ("labels", lambda: check_labels(held, state.get("labels_since"))),
+    ):
+        try:
+            result = check()
+        except Exception as exc:                            # noqa: BLE001 — ตัวหนึ่งพังต้องไม่หยุดตัวอื่น
+            errors.append(f"{name}: {type(exc).__name__}: {exc}")
+            continue
+        if name == "sec":
+            result, state["sec_since"] = result
+        elif name == "labels":
+            result, state["labels_since"] = result
+        found.extend(result)
+
+    new = [a for a in found if a["key"] not in state["fired"]]
+    summary: dict[str, Any] = {"ok": True, "checked": len(found), "new": len(new), "errors": errors,
+                               "alerts": [f"[{a['severity']}] {a['title']}" for a in new]}
+    if dry_run:
+        return summary
+
+    for alert in new:
+        state["fired"][alert["key"]] = alert["at"]
+    if new:
+        _record(new)
+        for alert in new:
+            if alert["severity"] != "info":
+                notify.send(f"🚨 {alert['title']}", alert["detail"], alert["severity"])
+    _save_state(state)
+
+    urgent = [a for a in new if a["severity"] in ESCALATE]
+    if urgent and escalate:
+        from . import runner
+        result = runner.run("replan", trigger=[f"[{a['severity']}] {a['title']} — {a['detail']}" for a in urgent])
+        summary["replan"] = (result.get("plan_id") if result.get("ok") and not result.get("skipped")
+                             else result.get("reason"))
+    return summary
