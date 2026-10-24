@@ -4,6 +4,8 @@
 # สิ่งที่สำรอง — เลือกมาเพราะ "หายแล้วสร้างใหม่ไม่ได้" เท่านั้น:
 #   data/raw/     ราคาที่ปรับแล้วเปลี่ยนย้อนหลัง · URL ข่าวเน่าตามเวลา
 #   data/labels/  label ที่ทำย้อนหลัง = ปนเปื้อน hindsight
+#   data/plans/   แผนรายสัปดาห์ + พรอมต์ที่ใช้จริง + ผลคำทำนาย — track record ของ PM
+#   data/alerts/  ประวัติการแจ้งเตือน (เหตุผลของทุก replan)
 #   Journal/      คำทำนาย บทวิเคราะห์ สมมติฐาน — งานสมองล้วน
 #
 # ไม่สำรอง data/derived/ เพราะคำนวณใหม่ได้จาก raw เสมอ
@@ -29,7 +31,7 @@ cd "${PROJECT_DIR}" || exit 1
 } >> "${LOG_FILE}"
 
 STATUS=0
-for SOURCE in data/raw data/labels Journal; do
+for SOURCE in data/raw data/labels data/plans data/alerts Journal; do
     if [[ ! -d "${SOURCE}" ]]; then
         echo "  ข้าม ${SOURCE} (ยังไม่มี)" >> "${LOG_FILE}"
         continue

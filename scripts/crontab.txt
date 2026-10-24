@@ -1,0 +1,10 @@
+# finbg — ตารางงานอัตโนมัติ (ติดตั้งด้วย: crontab scripts/crontab.txt)
+#
+# งานรายวัน/รายสัปดาห์ผ่าน anacron: รันงานที่พลาดเพราะเครื่องปิด (ดู scripts/anacrontab)
+#   เรียกทุกชั่วโมงช่วง 05:05–23:05 และตอนบูต — ไม่เรียก 00:00–04:59 เพราะตลาดสหรัฐยังเปิด
+#   anacron จำเองว่าวันนี้รันแล้วหรือยัง จึงเรียกบ่อยได้โดยไม่รันซ้ำ
+5 5-23 * * * /usr/sbin/anacron -s -t /home/you/investment-research/scripts/anacrontab -S /home/you/.local/state/finbg/anacron
+@reboot sleep 120; [ "$(date +\%H)" -ge 5 ] && /usr/sbin/anacron -s -t /home/you/investment-research/scripts/anacrontab -S /home/you/.local/state/finbg/anacron
+
+# เฝ้าข่าว/ราคาแรงทุกชั่วโมง (0 token จนกว่าจะเจอเรื่องใหญ่) — นาทีที่ 35 ไม่ชนกับ anacron
+35 * * * * /home/you/investment-research/scripts/watch.sh
