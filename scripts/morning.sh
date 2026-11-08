@@ -39,6 +39,10 @@ DAILY=$?
 "${PROJECT_DIR}/scripts/label-auto.sh"
 LABEL=$?
 
+# ทุกวัน: แทร็กไทย ขั้น 1 — รายชื่อ ราคา ข่าวหุ้นไทย (0 token · ไม่ขึ้นกับข้อมูลฝั่ง US จึงรันเสมอ) — โน้ต 13
+uv run finbg th collect >> "${LOG_DIR}/th-$(date +%Y-%m).log" 2>&1
+TH=$?
+
 # ขั้นที่ต้องใช้ข้อมูลสด — ถ้าเก็บข้อมูลไม่สำเร็จ ไม่ตัดสินใจจากข้อมูลเก่า (พรุ่งนี้ลองใหม่)
 VOL="skip"
 PLAN="skip"
@@ -60,6 +64,6 @@ if [[ ${DAILY} -eq 0 ]]; then
     echo "◀ จบ $(date '+%H:%M:%S') · volatility=${VOL} · plan=${PLAN}" >> "${PLAN_LOG}"
 fi
 
-echo "$(date '+%F %T') daily=${DAILY} label=${LABEL} volatility=${VOL} plan=${PLAN}" >> "${LOG_FILE}"
+echo "$(date '+%F %T') daily=${DAILY} label=${LABEL} th=${TH} volatility=${VOL} plan=${PLAN}" >> "${LOG_FILE}"
 find "${LOG_DIR}" -maxdepth 1 -name 'plan-*.log' -mtime +365 -delete 2>/dev/null
 [[ ${DAILY} -eq 0 ]] && exit 0 || exit "${DAILY}"

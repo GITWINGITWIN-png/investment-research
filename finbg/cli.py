@@ -26,6 +26,7 @@ from .pm import volatility as pm_volatility
 from .pm import watch as pm_watch
 from .scan import book as scan_book
 from .scan import runner as scan_runner
+from .th import collect as th_collect
 from .brief import context as context_module
 from .brief import render as render_module
 from .collect import calendar as calendar_module
@@ -393,6 +394,30 @@ def cmd_ideas(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_th(args: argparse.Namespace) -> int:
+    """แทร็กไทย ขั้น 1: เก็บรายชื่อ ราคา ข่าวหุ้นไทย (morning.sh เรียกทุกวัน · 0 token)"""
+    if args.action == "status":
+        s = th_collect.status()
+        u, p, n = s["universe"], s["prices"], s["news"]
+        print(f"🇹🇭 รายชื่อ: {u['snapshots']} snapshot (ล่าสุด {u['latest']}) · หุ้นสามัญตอนนี้ {u['common_stocks_now']} · "
+              f"เคยอยู่ในคลัง {u['ever_listed']}")
+        print(f"   ราคา: {p['snapshots']} snapshot · {p['tickers']} ตัว · แท่งล่าสุด {p['last_bar']}")
+        print(f"   ข่าว: ทั้งหมด {n['unique_items']} ชิ้น · 7 วัน {n['last_7d']} ชิ้น (ติดป้ายหุ้น {n['last_7d_tagged']}) · "
+              f"หุ้นที่ถูกพูดถึง {n['stocks_mentioned_7d']} ตัว")
+        print(f"   ถูกพูดถึงมากสุด: {', '.join(f'{t} {c}' for t, c in n['top'])}")
+        return 0
+    result = th_collect.run()
+    stamp = storage.utc_now().astimezone(config.LOCAL_TZ).strftime("%Y-%m-%d %H:%M")
+    print(f"🇹🇭 {stamp} เก็บข้อมูลหุ้นไทย")
+    for step in ("universe", "prices", "news"):
+        r = result[step]
+        detail = {k: v for k, v in r.items() if k not in ("ok", "feeds")}
+        print(f"   {'✅' if r.get('ok') else '❌'} {step}: {detail}")
+    for name, feed in (result["news"].get("feeds") or {}).items():
+        print(f"      {name}: {feed['items']} ชิ้น · {feed['pages']} หน้า · ย้อนครบ 30 ชม. {'✓' if feed['reached_cutoff'] else '✗'}")
+    return 0 if result["ok"] else 1
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """เฝ้าระวังหนึ่งรอบ — ปกติรันสัปดาห์ละครั้งก่อนออกแผน (--weekly)"""
     if args.weekly:
@@ -573,6 +598,10 @@ def main(argv: list[str] | None = None) -> int:
     p_ideas = sub.add_parser("ideas", help="ผลของพอร์ตไอเดียเทียบกลุ่มควบคุม")
     p_ideas.add_argument("action", nargs="?", default="status", choices=["status", "resolve"])
     p_ideas.set_defaults(func=cmd_ideas)
+
+    p_th = sub.add_parser("th", help="แทร็กไทย: เก็บรายชื่อ ราคา ข่าวหุ้นไทย (0 token)")
+    p_th.add_argument("action", nargs="?", default="collect", choices=["collect", "status"])
+    p_th.set_defaults(func=cmd_th)
 
     p_vol = sub.add_parser("volatility", help="หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (ทุกวัน)")
     p_vol.add_argument("--dry-run", action="store_true", help="ดูว่าตัวไหนเข้าเกณฑ์ โดยไม่เรียก Claude")

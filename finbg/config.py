@@ -570,3 +570,45 @@ TRIAGE_IC_MIN_NAMES = 10                   # ต่อรอบ — น้อย
 TRIAGE_IC_GATE_SESSIONS = 60               # ตัดสินเมื่อมีรอบที่คิดผลได้ครบเท่านี้ (~3 เดือน)
 TRIAGE_IC_EXTEND_SESSIONS = 120            # ถ้าครบ 60 แล้วเป็นบวกแต่ t < 2 → เก็บต่อถึงเท่านี้ แล้วตัดสินครั้งสุดท้าย
 TRIAGE_IC_NW_LAG = IDEA_HOLD_SESSIONS - 1  # ผลของรอบติดกันซ้อนทับกัน 19 วัน → t แบบ Newey-West
+
+# --- แทร็กไทย (finbg/th · finlab/thai.py · โน้ต 13) ---------------------------------
+# ผู้ใช้เลือก 2026-11-08: เปิดแทร็กไทยแยกจากการทดลอง US ทั้งหมด (ไม่ปนเกณฑ์ ไม่ปนพอร์ต)
+# ขั้น 1 = เก็บข้อมูลแบบ PIT ทุกวัน (0 token) — เหตุผลเดียวกับ background track: ของที่ย้อนเก็บไม่ได้ต้องเริ่มก่อน
+#
+# ตรวจกติกาของแต่ละเว็บแล้ว (2026-11-08):
+#   Yahoo (รายชื่อ + ราคา .BK)   ใช้อยู่แล้วกับฝั่ง US
+#   RSS สื่อหุ้นไทย              robots.txt อนุญาต · RSS ทำมาเพื่อให้ดึงอยู่แล้ว · เก็บในเครื่อง ไม่เผยแพร่ต่อ
+#   ประกาศของบริษัทใน SET       ❌ ยังไม่เก็บ — ข้อกำหนดของ SET อนุญาตใช้ส่วนตัว แต่ไม่มีช่องทางอัตโนมัติสาธารณะ
+#                                ที่ประกาศไว้ (ทางการคือ SMART Marketplace แบบเสียเงิน) → รอผู้ใช้ตัดสินใจ
+#   แบบ 59 การซื้อขายของผู้บริหาร ❌ ยังไม่เก็บ — sec.or.th บล็อกโปรแกรมด้วย WAF · robots ของ market.sec.or.th ห้ามหน้า idisc
+RAW_TH = RAW / "th"
+RAW_TH_UNIVERSE = RAW_TH / "universe"   # ทุกหลักทรัพย์ใน SET/mai ณ วันนั้น → universe ไร้ survivorship นับจากวันนี้ไป
+RAW_TH_PRICES = RAW_TH / "prices"       # แท่งรายวันย้อน ~1 เดือนของหุ้นสามัญไทยทุกตัว
+RAW_TH_NEWS = RAW_TH / "news"           # ข่าวหุ้นไทยจาก RSS
+TH_CALENDAR_TICKER = "PTT.BK"           # วันที่ PTT มีราคา = วันทำการของ SET
+TH_BAR_FINAL_HOUR = 17                  # เวลาไทย — SET ปิดราว 16:40 หลัง closing auction ก่อนหน้านั้นแท่งของวันนี้ยังไม่ปิด
+TH_PRICE_PERIOD = "1mo"                 # snapshot รายวันย้อน 1 เดือน (ซ้อนกันได้ ตัวอ่านเก็บค่าที่ดึงทีหลังสุด)
+TH_CHUNK = 50                           # ticker ต่อคำขอ — ลดโอกาสโดน rate limit ของ Yahoo
+
+# "ซื้อขายได้จริง" สำหรับรายย่อย — วัด 2026-11-08: 835 บริษัท แต่ครึ่งหนึ่งซื้อขาย < ฿0.4M/วัน
+TH_TRADABLE_MIN_VALUE = 5e6             # บาท/วัน มัธยฐาน 60 วัน — ไม้ ฿100k–500k = 2–10% ของวัน
+TH_TRADABLE_MIN_PRICE = 2.0             # ต่ำกว่านี้ 1 tick (฿0.01) ≥ 0.5% ของราคา
+# ตาราง tick ของ SET: (ราคาต่ำกว่า, ขนาด tick) — 1 tick ≈ ต้นทุน spread ขั้นต่ำของการซื้อแล้วขาย 1 รอบ
+TH_TICKS = [(2, 0.01), (5, 0.02), (10, 0.05), (25, 0.10), (100, 0.25), (200, 0.50), (400, 1.00), (float("inf"), 2.00)]
+TH_COMMISSION_ROUND_TRIP = 0.003        # ~0.15%/ข้าง รวม VAT — ขึ้นกับโบรก
+
+TH_NEWS_FEEDS: list[dict[str, str]] = [
+    {"name": "kaohoon", "url": "https://www.kaohoon.com/feed"},
+    {"name": "mitihoon", "url": "https://www.mitihoon.com/feed/"},
+    {"name": "prachachat-finance", "url": "https://www.prachachat.net/finance/feed"},
+    {"name": "infoquest", "url": "https://www.infoquest.co.th/feed"},
+]
+# ดึงวันละครั้งแล้วย้อนหน้า feed (?paged=N) จนเจอข่าวเก่ากว่านี้ — ได้ข่าวครบโดยไม่ต้องตั้งงานถี่ (ผู้ใช้ไม่เอางานรายชั่วโมง)
+TH_NEWS_LOOKBACK_HOURS = 30
+TH_NEWS_MAX_PAGES = 40
+TH_NEWS_PAGE_DELAY_SEC = 1.5            # สุภาพกับเว็บต้นทาง
+# ชื่อย่อหุ้นไทยที่ในข่าวมักหมายถึงอย่างอื่น → เก็บเป็น tickers_hint (ยังไม่ยืนยัน) ไม่ใช่ tickers
+# คัดจากพาดหัวจริง 2026-11-08: "AI" 16 ครั้งเป็นปัญญาประดิษฐ์ทั้งหมด · "CPI สหรัฐ" คือเงินเฟ้อ · "JV AMC" คือบริษัทบริหารสินทรัพย์
+# META/BYD ในข่าวไทยแทบทั้งหมดคือบริษัทต่างประเทศ ไม่ใช่หุ้นไทยตัวเล็กที่ใช้ชื่อย่อเดียวกัน
+TH_AMBIGUOUS_SYMBOLS = {"AI", "IT", "TH", "AMC", "CPI", "PLUS", "PM", "META", "BYD",
+                        "ASIA", "GREEN", "POWER", "SOLAR", "CITY", "BIG", "WIN", "SUPER", "PLANET", "HYDRO", "KISS"}
