@@ -54,8 +54,10 @@ uv run finbg notify setup       # (เลือกเปิด) แจ้งเ�
 uv run finbg scan --dry-run     # สแกนทั้งตลาด ดู 10 อันดับแรก ไม่เรียกโมเดล
 uv run finbg ideas              # พอร์ตไอเดีย: Claude vs สุ่ม vs ผู้เข้ารอบทั้งหมด + การทดสอบรอง (คะแนน Sonnet)
 
-uv run finbg th collect         # แทร็กไทย: เก็บรายชื่อ ราคา ข่าวหุ้นไทย (morning.sh เรียกทุกวัน) — โน้ต 13
-uv run finbg th status          # คลังไทยมีอะไรแล้ว · ข่าวครอบคลุมหุ้นกี่ตัว
+uv run finbg th collect         # แทร็กไทย: เก็บรายชื่อ ราคา ข่าว ตาราง 59 (morning.sh เรียกทุกวัน) — โน้ต 13
+uv run finbg th status          # คลังไทยมีอะไรแล้ว · ข่าวครอบคลุมหุ้นที่ซื้อขายได้กี่ตัว/วัน
+uv run finbg th scan --dry-run  # scanner ไทย: ผู้เข้ารอบวันนี้ ไม่เรียกโมเดล
+uv run finbg th ideas           # พอร์ตไอเดียไทย: Claude vs สุ่ม + การทดสอบรอง
 
 uv run finlab gate              # ตรวจ harness: ปฏิเสธ factor ปลอมได้ไหม
 uv run finlab eval momentum_12_1
@@ -213,7 +215,7 @@ schema v1: `regime` · `novelty` · `topic` + `topic_free` · `horizon` ·
 
 | งานใน anacron | รอบ | ทำอะไร |
 |---|---|---|
-| `finbg-morning` | ทุกวัน | `scripts/morning.sh` (เก็บข้อมูล → label → เก็บข้อมูลหุ้นไทย → สืบหุ้นผันผวน → สแกน → สรุปรายสัปดาห์ + แผนถ้าถึงเวลา) |
+| `finbg-morning` | ทุกวัน | `scripts/morning.sh` (เก็บข้อมูล → label → ข้อมูล + scanner หุ้นไทย → สืบหุ้นผันผวน → สแกน US → สรุปรายสัปดาห์ + แผนถ้าถึงเวลา) |
 | `finbg-backup` | ทุก 7 วัน | `scripts/backup.sh` |
 
 ไม่เรียก anacron ช่วง 00:00–04:59 เพราะเป็นช่วงที่ตลาดสหรัฐยังเปิด (ข้อมูลวันนั้นยังไม่ครบ)
