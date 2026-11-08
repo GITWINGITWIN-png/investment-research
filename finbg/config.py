@@ -612,3 +612,31 @@ TH_NEWS_PAGE_DELAY_SEC = 1.5            # สุภาพกับเว็บ�
 # META/BYD ในข่าวไทยแทบทั้งหมดคือบริษัทต่างประเทศ ไม่ใช่หุ้นไทยตัวเล็กที่ใช้ชื่อย่อเดียวกัน
 TH_AMBIGUOUS_SYMBOLS = {"AI", "IT", "TH", "AMC", "CPI", "PLUS", "PM", "META", "BYD",
                         "ASIA", "GREEN", "POWER", "SOLAR", "CITY", "BIG", "WIN", "SUPER", "PLANET", "HYDRO", "KISS"}
+# ดัชนี: Yahoo ให้แค่ค่าล่าสุด ไม่มีประวัติ (ตรวจ 2026-11-08) — เก็บทุกวันเองเพื่อสร้างประวัติไว้ใช้เป็นบริบท
+# (ไม่ใช้เป็น benchmark ของพอร์ตไอเดีย เพราะวันที่เครื่องปิดจะขาดถาวร)
+TH_INDEXES = ["^SET.BK", "^SET50.BK", "^SSET.BK", "^MAI.BK"]
+
+# ผู้ใช้เลือก 2026-11-08: ประกาศ SET → ใช้ข่าวจากสื่อแทน (C) · ตาราง 59 → ลองดึงหน้าบทความ InfoQuest (D)
+RAW_TH_ARTICLES = RAW_TH / "articles"   # เนื้อข่าวเต็มที่ดึงมาอ่าน (เฉพาะตัวที่ดำลึก + ตาราง 59)
+RAW_TH_INSIDER = RAW_TH / "insider"     # ตารางแบบ 59 ที่แยกเป็นรายการแล้ว
+TH_ARTICLE_TIMEOUT_SEC = 20
+TH_ARTICLE_DELAY_SEC = 2.0              # ห่างกันอย่างน้อยเท่านี้ระหว่างหน้า — อ่านแบบคน ไม่ใช่ crawler
+TH_ARTICLE_MAX_CHARS = 3000             # ต่อบทความที่ส่งให้ Opus
+TH_FORM59_TITLE = "การเปลี่ยนแปลงการถือหลักทรัพย์ของผู้บริหาร"   # หัวข้อข่าวตาราง 59 รายวันของ InfoQuest
+TH_FORM59_PER_RUN = 6                   # ดึงหน้าตาราง 59 ไม่เกินเท่านี้ต่อรอบ (ปกติวันละ 1 หน้า)
+
+# scanner ไทย (finbg/th/scan.py · โน้ต 13) — กรวยเดียวกับ US แต่เล็กกว่า (หุ้นที่ซื้อขายได้ ~150–200 ตัว)
+TH_OPPORTUNITIES = DATA / "opportunities_th"   # พอร์ตไอเดียไทย — แยกไฟล์จาก US เด็ดขาด
+JOURNAL_TH = JOURNAL / "Thai"
+TH_SCAN_TRADABLE_DAYS = 20              # มัธยฐานมูลค่าซื้อขายย้อนหลัง (คลังรายวันเริ่ม 2026-11-08 มีแค่ ~1 เดือน)
+TH_SCAN_CANDIDATES = 20                 # ชั้น 1 → Sonnet (ตัวที่มีเหตุการณ์จริงมักน้อยกว่านี้)
+TH_SCAN_DEEP_DIVES = 2                  # ชั้น 2 → Opus — ตามแผนที่ผู้ใช้ตกลง (โควตา Pro)
+TH_SCAN_NEWS_FRESH_HOURS = 6            # ข่าวในคลังต้องดึงมาไม่เกินเท่านี้ ไม่งั้นไม่สแกน (ไม่ตัดสินจากข่าวเก่า)
+TH_ARTICLES_PER_PICK = 3                # ดึงเนื้อข่าวเต็มให้ตัวที่ดำลึก ตัวละไม่เกินเท่านี้
+TH_ATTENTION_DAYS = 5                   # "สื่อสนใจแค่ไหน" ดูจากจำนวนข่าวช่วงก่อนหน้านี้
+TH_INSIDER_LOOKBACK_DAYS = 10
+TH_INSIDER_CLUSTER_MIN_BUYERS = 2
+TH_INSIDER_BIG_BUY_THB = 1_000_000
+TH_INSIDER_SINGLE_BUY_THB = 200_000
+TH_IDEA_HOLD_SESSIONS = 20
+TH_IDEA_GATE_MIN_RESOLVED = 100

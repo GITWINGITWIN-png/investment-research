@@ -26,7 +26,9 @@ from .pm import volatility as pm_volatility
 from .pm import watch as pm_watch
 from .scan import book as scan_book
 from .scan import runner as scan_runner
+from .th import book as th_book
 from .th import collect as th_collect
+from .th import scan as th_scan
 from .brief import context as context_module
 from .brief import render as render_module
 from .collect import calendar as calendar_module
@@ -395,7 +397,34 @@ def cmd_ideas(args: argparse.Namespace) -> int:
 
 
 def cmd_th(args: argparse.Namespace) -> int:
-    """แทร็กไทย ขั้น 1: เก็บรายชื่อ ราคา ข่าวหุ้นไทย (morning.sh เรียกทุกวัน · 0 token)"""
+    """แทร็กไทย: เก็บข้อมูล (collect) · สแกนหาโอกาส (scan) · ผลพอร์ตไอเดีย (ideas) · คลังมีอะไร (status)"""
+    if args.action == "scan":
+        r = th_scan.run(dry_run=args.dry_run, no_llm=args.no_llm, force=args.force)
+        if r.get("skipped"):
+            print(f"⏭️  {r['skipped']}")
+            return 0
+        print(f"🇹🇭 วันทำการ {r['session']} · ซื้อขายได้ {r['tradable']} ตัว · มีข่าวใหม่ {r['with_news']} · "
+              f"ผู้บริหารซื้อ {r['with_insider_buys']} → มีเหตุการณ์ {r['events']}")
+        print(f"   หน้าต่างข่าว {r['window']}")
+        for line in r.get("top", [])[:20]:
+            print(f"   · {line}")
+        if not r.get("dry_run"):
+            print(f"   ดำลึก: {', '.join(r['picks']) or '—'} · เข้าพอร์ตไอเดีย: {', '.join(r['booked']) or 'ไม่มี'} · "
+                  f"กลุ่มสุ่ม: {', '.join(r['control']) or '—'} · ต้นทุนเทียบเท่า ${r['cost_usd']}")
+            for key in ("triage_error", "deepdive_error"):
+                if r.get(key):
+                    print(f"   ⚠️  {key}: {r[key]}")
+            print(f"   หน้า → {r['page']}")
+        return 0
+    if args.action == "ideas":
+        print(th_book.resolve())
+        board = th_book.scoreboard()
+        for name, key in (("ไอเดียของ Claude", "ideas"), ("กลุ่มควบคุม", "control"), ("ผู้เข้ารอบทั้งหมด", "candidates")):
+            s = board[key]
+            print(f"{name:18} n={s['n']:4}  เฉลี่ย {s['mean_pct'] if s['mean_pct'] is not None else '—':>6}%  t={s['t']}")
+        print(f"Claude − สุ่ม: {board['ideas_minus_control'] or 'ยังไม่พอคำนวณ'} · ยังถือ {board['open_ideas']} · {board['gate']}")
+        print(f"การทดสอบรอง (คะแนน Sonnet): {board['triage_ic']['verdict']}")
+        return 0
     if args.action == "status":
         s = th_collect.status()
         u, p, n = s["universe"], s["prices"], s["news"]
@@ -405,11 +434,15 @@ def cmd_th(args: argparse.Namespace) -> int:
         print(f"   ข่าว: ทั้งหมด {n['unique_items']} ชิ้น · 7 วัน {n['last_7d']} ชิ้น (ติดป้ายหุ้น {n['last_7d_tagged']}) · "
               f"หุ้นที่ถูกพูดถึง {n['stocks_mentioned_7d']} ตัว")
         print(f"   ถูกพูดถึงมากสุด: {', '.join(f'{t} {c}' for t, c in n['top'])}")
+        print(f"   หุ้นที่ซื้อขายได้จริง {n['tradable_now']} ตัว · ถูกพูดถึงต่อวัน: "
+              + " · ".join(f"{d[5:]} {c}" for d, c in n["tradable_mentioned_per_day"].items()))
+        i = s["insider"]
+        print(f"   ตาราง 59: อ่านแล้ว {i['posts_read']} ฉบับ · {i['rows']} รายการ (ซื้อ {i['buys']})")
         return 0
-    result = th_collect.run()
+    result = th_collect.run(news_hours=args.news_hours)
     stamp = storage.utc_now().astimezone(config.LOCAL_TZ).strftime("%Y-%m-%d %H:%M")
     print(f"🇹🇭 {stamp} เก็บข้อมูลหุ้นไทย")
-    for step in ("universe", "prices", "news"):
+    for step in ("universe", "prices", "news", "insider"):
         r = result[step]
         detail = {k: v for k, v in r.items() if k not in ("ok", "feeds")}
         print(f"   {'✅' if r.get('ok') else '❌'} {step}: {detail}")
@@ -599,8 +632,13 @@ def main(argv: list[str] | None = None) -> int:
     p_ideas.add_argument("action", nargs="?", default="status", choices=["status", "resolve"])
     p_ideas.set_defaults(func=cmd_ideas)
 
-    p_th = sub.add_parser("th", help="แทร็กไทย: เก็บรายชื่อ ราคา ข่าวหุ้นไทย (0 token)")
-    p_th.add_argument("action", nargs="?", default="collect", choices=["collect", "status"])
+    p_th = sub.add_parser("th", help="แทร็กไทย: collect (0 token) · scan · ideas · status — โน้ต 13")
+    p_th.add_argument("action", nargs="?", default="collect", choices=["collect", "scan", "ideas", "status"])
+    p_th.add_argument("--news-hours", type=int, default=None,
+                      help="ย้อนข่าวนานกว่าปกติ (ใช้ครั้งเดียวตอนเริ่ม เช่น 168 = 7 วัน)")
+    p_th.add_argument("--dry-run", action="store_true", help="scan: ดูผู้เข้ารอบ ไม่เรียกโมเดล ไม่บันทึก")
+    p_th.add_argument("--no-llm", action="store_true", help="scan: บันทึกผู้เข้ารอบโดยไม่เรียกโมเดล")
+    p_th.add_argument("--force", action="store_true", help="scan: สแกนซ้ำแม้วันทำการนี้สแกนแล้ว")
     p_th.set_defaults(func=cmd_th)
 
     p_vol = sub.add_parser("volatility", help="หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (ทุกวัน)")

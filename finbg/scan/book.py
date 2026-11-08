@@ -194,18 +194,21 @@ def _newey_west_t(values: list[float], lag: int) -> float | None:
     return round(mean / math.sqrt(variance / n), 2) if variance > 0 else None
 
 
-def triage_ic() -> dict[str, Any]:
+def triage_ic(candidates_path=None, resolutions_path=None, voided: set[str] | None = None) -> dict[str, Any]:
     """การทดสอบรอง (โน้ต 12 · ตั้ง 2026-11-08 ก่อนมีผลจริงตัวแรก): คะแนนของ Sonnet เรียงผู้เข้ารอบตรงกับผลจริงไหม
 
     คะแนน = information_value × overlooked — สูตรเดียวกับที่ triage.pick ใช้เลือกตัวไปดำลึก (ไม่ได้คิดสูตรใหม่หลังเห็นผล)
     ต่อรอบสแกน: rank correlation ระหว่างคะแนนกับผลตอบแทนส่วนเกิน 20 วันของผู้เข้ารอบที่คิดผลแล้ว → เฉลี่ยข้ามรอบ
     คู่เทียบ: คะแนนชั้น 1 ของโค้ด และ "ส่วนที่ Sonnet เพิ่ม" หลังหักสิ่งที่คะแนนของโค้ดอธิบายได้แล้ว
+
+    ค่าปริยาย = ไฟล์ของ scanner US · แทร็กไทย (finbg/th/book.py) ส่ง path ของตัวเองมา เพื่อให้ทั้งสองตลาด
+    ถูกวัดด้วยสถิติชุดเดียวกันเป๊ะ
     """
-    voided = voided_runs()
-    outcome = {r["id"]: r["excess"] for r in _read(RESOLUTIONS)
+    voided = voided_runs() if voided is None else voided
+    outcome = {r["id"]: r["excess"] for r in _read(resolutions_path or RESOLUTIONS)
                if r.get("kind") == "candidate" and r.get("outcome") == "ok"}
     runs: dict[tuple[str, str], list[tuple[float, float, float, bool]]] = {}
-    for c in _read(CANDIDATES):
+    for c in _read(candidates_path or CANDIDATES):
         t = c.get("triage")
         if c["created_at"] in voided or not t or c["id"] not in outcome:
             continue
