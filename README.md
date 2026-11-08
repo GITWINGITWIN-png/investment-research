@@ -52,10 +52,15 @@ uv run finbg watch --dry-run    # สรุป 8-K/ข่าวแรง/VIX ต
 uv run finbg notify setup       # (เลือกเปิด) แจ้งเตือนบนมือถือผ่าน ntfy
 
 uv run finbg scan --dry-run     # สแกนทั้งตลาด ดู 10 อันดับแรก ไม่เรียกโมเดล
-uv run finbg ideas              # พอร์ตไอเดีย: Claude vs สุ่ม vs ผู้เข้ารอบทั้งหมด
+uv run finbg ideas              # พอร์ตไอเดีย: Claude vs สุ่ม vs ผู้เข้ารอบทั้งหมด + การทดสอบรอง (คะแนน Sonnet)
+
+uv run finbg th collect         # แทร็กไทย: เก็บรายชื่อ ราคา ข่าวหุ้นไทย (morning.sh เรียกทุกวัน) — โน้ต 13
+uv run finbg th status          # คลังไทยมีอะไรแล้ว · ข่าวครอบคลุมหุ้นกี่ตัว
 
 uv run finlab gate              # ตรวจ harness: ปฏิเสธ factor ปลอมได้ไหม
 uv run finlab eval momentum_12_1
+uv run finlab thai-prices       # ราคา 10 ปีของหุ้นไทยสำหรับงานวิจัย
+uv run finlab thai              # factor ช้าในหุ้นไทยที่ซื้อขายได้จริง หักต้นทุนตาม tick
 
 uv run finbg queue              # ← token เหลือ ใช้ทำอะไรดี
 uv run finbg label prepare      # เตรียม batch (ฟรี)
@@ -208,7 +213,7 @@ schema v1: `regime` · `novelty` · `topic` + `topic_free` · `horizon` ·
 
 | งานใน anacron | รอบ | ทำอะไร |
 |---|---|---|
-| `finbg-morning` | ทุกวัน | `scripts/morning.sh` (เก็บข้อมูล → label → สืบหุ้นผันผวน → สรุปรายสัปดาห์ + แผนถ้าถึงเวลา) |
+| `finbg-morning` | ทุกวัน | `scripts/morning.sh` (เก็บข้อมูล → label → เก็บข้อมูลหุ้นไทย → สืบหุ้นผันผวน → สแกน → สรุปรายสัปดาห์ + แผนถ้าถึงเวลา) |
 | `finbg-backup` | ทุก 7 วัน | `scripts/backup.sh` |
 
 ไม่เรียก anacron ช่วง 00:00–04:59 เพราะเป็นช่วงที่ตลาดสหรัฐยังเปิด (ข้อมูลวันนั้นยังไม่ครบ)
@@ -217,7 +222,8 @@ schema v1: `regime` · `novelty` · `topic` + `topic_free` · `horizon` ·
 ตรวจสอบว่าทำงาน:
 
 ```bash
-tail -5 data/logs/morning-$(date +%Y-%m).log    # daily=0 label=0 plan=0|skip
+tail -5 data/logs/morning-$(date +%Y-%m).log    # daily=0 label=0 th=0 plan=0|skip
+tail -12 data/logs/th-$(date +%Y-%m).log        # แทร็กไทย: รายชื่อ/ราคา/ข่าว + feed ย้อนครบ 30 ชม. ไหม
 tail -20 data/logs/plan-$(date +%Y-%m).log
 ```
 
