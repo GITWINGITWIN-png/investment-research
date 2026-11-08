@@ -337,7 +337,13 @@ def _render_scoreboard(board: dict[str, Any]) -> None:
             return f"| {name} | 0 | — | — | — |"
         return f"| {name} | {s['n']} | {s['mean_pct']:+.2f}% | {s['hit_pct']}% | {s['t'] if s['t'] is not None else '—'} |"
 
+    def ic_row(name: str, s: dict[str, Any]) -> str:
+        if not s["sessions"]:
+            return f"| {name} | 0 | — | — |"
+        return f"| {name} | {s['sessions']} | {s['mean_ic']:+.4f} | {s['t_nw'] if s['t_nw'] is not None else '—'} |"
+
     diff = board.get("ideas_minus_control")
+    tri = board["triage_ic"]
     lines = [
         "---", "tags: [opportunity, scoreboard]", "---", "",
         "# 📊 พอร์ตไอเดีย — ผลจริงหลัง 20 วันทำการ", "",
@@ -350,6 +356,15 @@ def _render_scoreboard(board: dict[str, Any]) -> None:
         f"**Claude − สุ่ม:** {f'{diff['diff_pct']:+.2f} จุด · t = {diff['t']}' if diff else 'ยังไม่พอคำนวณ'} "
         "← ตัวเลขที่ตอบคำถามหลัก: การดำลึกหาโอกาสที่คนมองข้ามได้จริงไหม",
         f"**Brier ของความมั่นใจ:** {board['brier'] if board['brier'] is not None else '—'} (ต่ำกว่า 0.25 = ดีกว่าเดาครึ่งต่อครึ่ง)", "",
+        "## การทดสอบรอง — คะแนนของ Sonnet เรียงผู้เข้ารอบตรงกับผลจริงไหม (ตั้ง 2026-11-08)", "",
+        "ใช้ผู้เข้ารอบทุกตัว (~30 ตัว/รอบ) จึงไวกว่าการทดสอบหลักที่ได้ ~1 ไอเดีย/วัน · "
+        "IC = rank correlation ต่อรอบ เฉลี่ยข้ามรอบ · t แบบ Newey-West เพราะผลของรอบติดกันซ้อนทับกัน", "",
+        "| คะแนน | รอบ | IC เฉลี่ย | t |", "|---|---:|---:|---:|",
+        ic_row("Sonnet: ข้อมูล × มองข้าม", tri["sonnet"]), ic_row("ชั้น 1 ของโค้ด (อ้างอิง)", tri["code"]),
+        ic_row("ส่วนที่ Sonnet เพิ่มจากคะแนนของโค้ด", tri["sonnet_beyond_code"]), "",
+        "| ผู้เข้ารอบ | จำนวน | เฉลี่ย | ชนะ benchmark | t |", "|---|---:|---:|---:|---:|",
+        row("Sonnet ส่งไปดำลึก", tri["deep_dive"]), row("Sonnet ไม่ส่ง", tri["not_deep_dive"]), "",
+        f"**ผล:** {tri['verdict']}", "",
         "## แยกตามประเภทไอเดีย", "", "| ประเภท | จำนวน | เฉลี่ย | ชนะ | t |", "|---|---:|---:|---:|---:|",
         *[row(k, v) for k, v in board["by_type"].items()], "",
         "🔗 [[12 - Opportunity Scanner]]", "",

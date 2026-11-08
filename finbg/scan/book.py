@@ -161,6 +161,92 @@ def _stats(values: list[float]) -> dict[str, float | None]:
             "t": round(mean / (sd / math.sqrt(len(values))), 2) if sd > 0 else None}
 
 
+def _spearman(x: list[float], y: list[float]) -> float | None:
+    """Rank correlation — ใช้อันดับเฉลี่ยเมื่อเสมอกัน (คะแนน triage ซ้ำกันบ่อย)"""
+    rx, ry = pd.Series(x, dtype=float).rank(), pd.Series(y, dtype=float).rank()
+    if len(rx) < 3 or rx.std() == 0 or ry.std() == 0:
+        return None
+    return float(rx.corr(ry))
+
+
+def _residual_ranks(y: list[float], x: list[float]) -> list[float]:
+    """อันดับของ y หลังหักส่วนที่อันดับของ x อธิบายได้ — "Sonnet รู้อะไรที่คะแนนของโค้ดไม่รู้"""
+    ry, rx = pd.Series(y, dtype=float).rank(pct=True), pd.Series(x, dtype=float).rank(pct=True)
+    beta = ry.cov(rx) / rx.var() if rx.var() > 0 else 0.0
+    return list(ry - ry.mean() - beta * (rx - rx.mean()))
+
+
+def _newey_west_t(values: list[float], lag: int) -> float | None:
+    """t ของค่าเฉลี่ย เมื่อค่าที่อยู่ติดกันสัมพันธ์กัน
+
+    รอบสแกนที่ติดกันถือหุ้นช่วงเวลาซ้อนทับกัน 19 วัน (และหุ้นตัวเดิมเข้ารอบซ้ำได้) — t ธรรมดาจะนับ
+    20 รอบที่แทบเป็นเหตุการณ์เดียวกันเป็น 20 ตัวอย่างอิสระ แล้วสูงเกินจริง
+    Newey-West รวม covariance ของรอบที่ห่างกันไม่เกิน `lag` เข้าไปใน variance ด้วย (น้ำหนักลดลงตามระยะห่าง)
+    """
+    n = len(values)
+    if n < 3:
+        return None
+    mean = statistics.fmean(values)
+    dev = [v - mean for v in values]
+    lag = min(lag, n - 1)
+    gamma = [sum(dev[i] * dev[i - k] for i in range(k, n)) / n for k in range(lag + 1)]
+    variance = gamma[0] + 2 * sum((1 - k / (lag + 1)) * gamma[k] for k in range(1, lag + 1))
+    return round(mean / math.sqrt(variance / n), 2) if variance > 0 else None
+
+
+def triage_ic() -> dict[str, Any]:
+    """การทดสอบรอง (โน้ต 12 · ตั้ง 2026-11-08 ก่อนมีผลจริงตัวแรก): คะแนนของ Sonnet เรียงผู้เข้ารอบตรงกับผลจริงไหม
+
+    คะแนน = information_value × overlooked — สูตรเดียวกับที่ triage.pick ใช้เลือกตัวไปดำลึก (ไม่ได้คิดสูตรใหม่หลังเห็นผล)
+    ต่อรอบสแกน: rank correlation ระหว่างคะแนนกับผลตอบแทนส่วนเกิน 20 วันของผู้เข้ารอบที่คิดผลแล้ว → เฉลี่ยข้ามรอบ
+    คู่เทียบ: คะแนนชั้น 1 ของโค้ด และ "ส่วนที่ Sonnet เพิ่ม" หลังหักสิ่งที่คะแนนของโค้ดอธิบายได้แล้ว
+    """
+    voided = voided_runs()
+    outcome = {r["id"]: r["excess"] for r in _read(RESOLUTIONS)
+               if r.get("kind") == "candidate" and r.get("outcome") == "ok"}
+    runs: dict[tuple[str, str], list[tuple[float, float, float, bool]]] = {}
+    for c in _read(CANDIDATES):
+        t = c.get("triage")
+        if c["created_at"] in voided or not t or c["id"] not in outcome:
+            continue
+        runs.setdefault((c["session"], c["created_at"]), []).append(
+            (t["information_value"] * t["overlooked"], c["score"], outcome[c["id"]], bool(t.get("deep_dive"))))
+
+    series: dict[str, list[float]] = {"sonnet": [], "code": [], "sonnet_beyond_code": []}
+    dive, no_dive = [], []
+    for key in sorted(runs):                                   # เรียงตามเวลา — Newey-West ต้องรู้ว่ารอบไหนติดกัน
+        rows = runs[key]
+        sonnet, code, excess = [r[0] for r in rows], [r[1] for r in rows], [r[2] for r in rows]
+        ic_sonnet = _spearman(sonnet, excess)
+        if len(rows) < config.TRIAGE_IC_MIN_NAMES or ic_sonnet is None:
+            continue                                           # ตัวน้อยไป หรือ Sonnet ให้คะแนนเท่ากันทั้งรอบ
+        series["sonnet"].append(ic_sonnet)
+        for name, value in (("code", _spearman(code, excess)),
+                            ("sonnet_beyond_code", _spearman(_residual_ranks(sonnet, code), excess))):
+            if value is not None:
+                series[name].append(value)
+        dive += [r[2] for r in rows if r[3]]
+        no_dive += [r[2] for r in rows if not r[3]]
+
+    def summarize(values: list[float]) -> dict[str, Any]:
+        return {"sessions": len(values), "mean_ic": round(statistics.fmean(values), 4) if values else None,
+                "t_nw": _newey_west_t(values, config.TRIAGE_IC_NW_LAG)}
+
+    main = summarize(series["sonnet"])
+    n, ic, t = main["sessions"], main["mean_ic"], main["t_nw"]
+    if n < config.TRIAGE_IC_GATE_SESSIONS:
+        verdict = f"ยังไม่ตัดสิน — ตัดสินเมื่อครบ {config.TRIAGE_IC_GATE_SESSIONS} รอบ (ตอนนี้ {n})"
+    elif ic is not None and ic > 0 and t is not None and t >= 2:
+        verdict = "✅ คะแนนของ Sonnet เรียงผลได้ดีกว่าบังเอิญ"
+    elif ic is not None and ic > 0 and n < config.TRIAGE_IC_EXTEND_SESSIONS:
+        verdict = f"➖ เป็นบวกแต่ t < 2 — เก็บต่อถึง {config.TRIAGE_IC_EXTEND_SESSIONS} รอบแล้วตัดสินครั้งสุดท้าย (ตอนนี้ {n})"
+    else:
+        verdict = "❌ ไม่ดีกว่าบังเอิญ — การคัดกรองของ Sonnet ไม่ได้เพิ่มอะไรภายในผู้เข้ารอบ 30 ตัว"
+    return {"sonnet": main, "code": summarize(series["code"]),
+            "sonnet_beyond_code": summarize(series["sonnet_beyond_code"]),
+            "deep_dive": _stats(dive), "not_deep_dive": _stats(no_dive), "verdict": verdict}
+
+
 def scoreboard() -> dict[str, Any]:
     voided = voided_runs()
     resolved = {r["id"]: r for r in _read(RESOLUTIONS)}
@@ -195,4 +281,5 @@ def scoreboard() -> dict[str, Any]:
         "brier": round(sum((p - h) ** 2 for p, h in calibration) / len(calibration), 4) if calibration else None,
         "data_missing": missing, "open_ideas": open_ideas,
         "gate": f"ตัดสินเมื่อมีไอเดียครบ {config.IDEA_GATE_MIN_RESOLVED} ตัว (ตอนนี้ {len(ideas_s)})",
+        "triage_ic": triage_ic(),
     }

@@ -387,6 +387,9 @@ def cmd_ideas(args: argparse.Namespace) -> int:
               f"ชนะ {s['hit_pct'] if s['hit_pct'] is not None else '—'}%  t={s['t']}")
     diff = board.get("ideas_minus_control")
     print(f"Claude − สุ่ม: {diff if diff else 'ยังไม่พอคำนวณ'} · ยังถือ {board['open_ideas']} · {board['gate']}")
+    tri = board["triage_ic"]
+    print(f"การทดสอบรอง (คะแนน Sonnet): IC {tri['sonnet']['mean_ic']} t={tri['sonnet']['t_nw']} · "
+          f"เพิ่มจากโค้ด IC {tri['sonnet_beyond_code']['mean_ic']} · {tri['verdict']}")
     return 0
 
 
