@@ -57,14 +57,14 @@ def _parse_time(value: str) -> datetime | None:
         return None
 
 
-def fetch_feed(feed: dict[str, str], cutoff: datetime,
-               patterns: Patterns) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def fetch_feed(feed: dict[str, str], cutoff: datetime, patterns: Patterns,
+               max_pages: int = config.TH_NEWS_MAX_PAGES) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """ย้อนหน้า feed จนข่าวเก่าสุดของหน้าเก่ากว่า cutoff — คืน (ข่าว, สถิติของ feed นี้)"""
     import feedparser
 
     found: dict[str, dict[str, Any]] = {}                 # key = URL · หน้าเลื่อนได้ถ้ามีข่าวใหม่ระหว่างดึง
     pages, reached = 0, False
-    for page in range(1, config.TH_NEWS_MAX_PAGES + 1):
+    for page in range(1, max_pages + 1):
         url = feed["url"] if page == 1 else f"{feed['url']}?paged={page}"
         try:
             parsed = feedparser.parse(url, agent=config.USER_AGENT)
@@ -100,18 +100,25 @@ def fetch_feed(feed: dict[str, str], cutoff: datetime,
     return list(found.values()), {"pages": pages, "items": len(found), "reached_cutoff": reached}
 
 
-def collect(symbols: list[str]) -> dict[str, Any]:
-    """ทุก feed → 1 ไฟล์ JSONL ต่อการรัน (ข้อมูลดิบตามที่เห็น ณ เวลานั้น)"""
-    cutoff = storage.utc_now() - timedelta(hours=config.TH_NEWS_LOOKBACK_HOURS)
+def collect(symbols: list[str], hours: int | None = None) -> dict[str, Any]:
+    """ทุก feed → 1 ไฟล์ JSONL ต่อการรัน (ข้อมูลดิบตามที่เห็น ณ เวลานั้น)
+
+    `hours` ย้อนนานกว่าปกติได้ (ใช้ครั้งเดียวตอนเริ่ม เพื่อวัดความครอบคลุมโดยไม่ต้องรอข่าวสะสม 2 สัปดาห์)
+    ข่าวที่ย้อนเก็บมีเวลาเผยแพร่จริงติดมา — ใช้วัดความครอบคลุมได้ แต่ scanner ใช้เฉพาะข่าวในหน้าต่างของแต่ละรอบ
+    """
+    lookback = hours or config.TH_NEWS_LOOKBACK_HOURS
+    cutoff = storage.utc_now() - timedelta(hours=lookback)
+    max_pages = config.TH_NEWS_MAX_PAGES if hours is None else max(config.TH_NEWS_MAX_PAGES, hours * 2)
     patterns = ticker_patterns(symbols)
     records: list[dict[str, Any]] = []
     stats: dict[str, Any] = {}
     for feed in config.TH_NEWS_FEEDS:
-        items, stats[feed["name"]] = fetch_feed(feed, cutoff, patterns)
+        items, stats[feed["name"]] = fetch_feed(feed, cutoff, patterns, max_pages)
         records += items
     if not records:
         return {"ok": False, "reason": "ไม่ได้ข่าวจาก feed ใดเลย", "feeds": stats}
     day = storage.utc_now().astimezone(config.LOCAL_TZ).date().isoformat()
-    path = storage.write_jsonl(records, config.RAW_TH_NEWS / f"{day}.jsonl", kind="th_news", feeds=stats)
+    path = storage.write_jsonl(records, config.RAW_TH_NEWS / f"{day}.jsonl", kind="th_news", feeds=stats,
+                               lookback_hours=lookback)
     tagged = sum(1 for r in records if r["tickers"])
     return {"ok": True, "items": len(records), "tagged": tagged, "feeds": stats, "path": str(path.relative_to(config.ROOT))}

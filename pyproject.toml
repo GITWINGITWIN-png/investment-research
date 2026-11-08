@@ -5,6 +5,7 @@ description = "Background track: PIT data collection, paper baselines, and situa
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "beautifulsoup4>=4.12",
     "duckdb>=1.5.5",
     "feedparser>=6.0.14",
     "matplotlib>=3.11.1",

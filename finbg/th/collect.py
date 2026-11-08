@@ -14,7 +14,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from .. import config, storage
-from . import news, prices, universe
+from . import insider, news, prices, universe
 
 
 def _guarded(step: Callable[..., dict[str, Any]], *args: Any) -> dict[str, Any]:
@@ -24,16 +24,29 @@ def _guarded(step: Callable[..., dict[str, Any]], *args: Any) -> dict[str, Any]:
         return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
 
 
-def run() -> dict[str, Any]:
+def run(news_hours: int | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {"universe": _guarded(universe.snapshot)}
     symbols = universe.ever_listed()                      # ใช้ snapshot เก่าได้ ถ้าวันนี้ screener ล่ม
     if not symbols:
         reason = {"ok": False, "reason": "ยังไม่มีรายชื่อหุ้นในคลังเลย"}
-        return {**result, "prices": reason, "news": reason, "ok": False}
-    result["prices"] = _guarded(prices.snapshot, symbols)
-    result["news"] = _guarded(news.collect, symbols)
+        return {**result, "prices": reason, "news": reason, "insider": reason, "ok": False}
+    result["prices"] = _guarded(prices.snapshot, symbols + config.TH_INDEXES)
+    result["news"] = _guarded(news.collect, symbols, news_hours)
+    result["insider"] = _guarded(insider.collect)         # ต้องมาหลังข่าว — ใช้ลิงก์ตาราง 59 จาก feed
     result["ok"] = all(step.get("ok") for step in result.values())
     return result
+
+
+def tradable_now(table: pd.DataFrame) -> set[str]:
+    """หุ้นที่ซื้อขายได้จริง ณ แท่งล่าสุดในคลัง (มัธยฐานมูลค่าซื้อขาย 20 วัน · ราคาขั้นต่ำ)"""
+    if table.empty:
+        return set()
+    stocks = table[~table["ticker"].str.startswith("^")]
+    value = (stocks["close"] * stocks["volume"]).groupby(stocks["ticker"]).apply(
+        lambda s: s.tail(config.TH_SCAN_TRADABLE_DAYS).median())
+    last = stocks.sort_values("date").groupby("ticker")["close"].last()
+    ok = (value >= config.TH_TRADABLE_MIN_VALUE) & (last.reindex(value.index) >= config.TH_TRADABLE_MIN_PRICE)
+    return set(value[ok].index)
 
 
 def status(days: int = 7) -> dict[str, Any]:
@@ -57,8 +70,19 @@ def status(days: int = 7) -> dict[str, Any]:
     recent = [r for r in seen.values()
               if r.get("published_at") and pd.Timestamp(r["published_at"]) >= pd.Timestamp(since)]
     mentions = collections.Counter(t for r in recent for t in r["tickers"])
+    # ตัวเลขที่ตัดสินว่า scanner ไทยมีวัตถุดิบพอไหม: หุ้นที่ "ซื้อขายได้จริง" ถูกพูดถึงกี่ตัวต่อวัน
+    tradable = tradable_now(table)
+    per_day: dict[str, set[str]] = collections.defaultdict(set)
+    for r in recent:
+        day = pd.Timestamp(r["published_at"]).tz_convert(config.LOCAL_TZ).date().isoformat()
+        per_day[day] |= set(r["tickers"]) & tradable
     out["news"] = {"unique_items": len(seen), f"last_{days}d": len(recent),
                    f"last_{days}d_tagged": sum(1 for r in recent if r["tickers"]),
                    f"stocks_mentioned_{days}d": len(mentions), "top": mentions.most_common(10),
-                   "by_publisher": dict(collections.Counter(r["publisher"] for r in recent))}
+                   "by_publisher": dict(collections.Counter(r["publisher"] for r in recent)),
+                   "tradable_now": len(tradable),
+                   "tradable_mentioned_per_day": {d: len(s) for d, s in sorted(per_day.items())}}
+    rows = insider.read_all()
+    out["insider"] = {"posts_read": len(insider.processed()), "rows": len(rows),
+                      "buys": int((rows["method"] == "ซื้อ").sum()) if not rows.empty else 0}
     return out
