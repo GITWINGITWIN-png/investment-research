@@ -10,8 +10,7 @@
 from __future__ import annotations
 
 import pandas as pd
-import yfinance as yf
-
+from ..datasource import yf
 from .. import config, market, storage
 
 

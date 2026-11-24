@@ -34,7 +34,12 @@ ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_noda
 
 
 def _headers() -> dict[str, str]:
-    """SEC ต้องการ User-Agent ที่มีอีเมลติดต่อได้ ไม่งั้น 403"""
+    """SEC ต้องการ User-Agent ที่มีอีเมลติดต่อได้ ไม่งั้น 403 (ค่ามาจาก FINBG_SEC_USER_AGENT)"""
+    if not config.SEC_USER_AGENT:
+        raise RuntimeError(
+            "FINBG_SEC_USER_AGENT is not set. The SEC asks for a contact name and email in the "
+            'User-Agent, for example: export FINBG_SEC_USER_AGENT="your-project you@your-domain.com"'
+        )
     return {"User-Agent": config.SEC_USER_AGENT, "Accept-Encoding": "gzip, deflate"}
 
 

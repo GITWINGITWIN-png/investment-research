@@ -9,9 +9,9 @@ from __future__ import annotations
 import re
 
 import pandas as pd
-import requests
 
 from .. import config, storage
+from ..datasource import SourceNotIncluded
 
 SYMBOL = re.compile(r"^[A-Z]{1,5}([.\-][A-Z])?$")
 EXCLUDE_NAME = re.compile(r"\b(Warrants?|Rights|Units?|Acquisition Corp|Preferred|Depositary|Notes due|ETF|Trust Units)\b", re.I)
@@ -25,10 +25,22 @@ def _number(text: object) -> float | None:
         return None
 
 
+def _screener_rows() -> list[dict]:
+    """Rows in the Nasdaq screener's shape: symbol, name, lastsale, pctchange, volume,
+    marketCap, country, sector, industry, ipoyear.
+
+    Public edition: the private version read them from api.nasdaq.com, whose robots.txt
+    disallows automated access, so this copy does not. Return rows of this shape from a
+    source you are allowed to use.
+    """
+    raise SourceNotIncluded(
+        "Stock universe source not included in the public edition: api.nasdaq.com disallows "
+        "automated access in robots.txt. Implement _screener_rows() in finbg/scan/universe.py."
+    )
+
+
 def fetch() -> pd.DataFrame:
-    response = requests.get(config.NASDAQ_SCREENER_URL, headers=config.BROWSER_HEADERS, timeout=60)
-    response.raise_for_status()
-    rows = response.json()["data"]["rows"]
+    rows = _screener_rows()
     df = pd.DataFrame([{
         "ticker": str(r.get("symbol", "")).strip().upper().replace("/", "-"),
         "name": r.get("name", ""),

@@ -74,8 +74,7 @@ def universe() -> dict[str, Any]:
 
 def download_prices(years: int = 10, chunk: int = 50, refresh: bool = False) -> dict[str, Any]:
     """ดาวน์โหลดราคา 10 ปีของทั้ง universe ทีละก้อน (ลดโอกาสโดน rate limit)"""
-    import yfinance as yf
-
+    from finbg.datasource import yf
     from finbg.collect.prices import _tidy
 
     u = universe()

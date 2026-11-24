@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -154,11 +155,9 @@ NEWS_QUERIES: list[str] = [
 # เรียงจากเร็ว/เชื่อถือได้มากที่สุด ไปหาช้าที่สุด
 # ตัดแหล่งไหนออกก็แค่ลบชื่อออกจาก list นี้
 #
-# yahoo ถูกปิด (2026-10-23): log รายวันแสดง "yahoo → 0 รายการ" มาตลอด
-# ทดสอบแล้วว่า Ticker.news คืน list ว่างทั้ง yfinance 1.5.2 และ 1.7.0 (รุ่นล่าสุด)
-# = Yahoo เปลี่ยนฝั่งเซิร์ฟเวอร์ ไม่ใช่บั๊กของเรา โค้ดยังเก็บไว้ เปิดใหม่ได้ถ้ากลับมาใช้ได้
-# แทนด้วย gnews (Google News RSS) ที่ค้นรายบริษัท ไม่ต้องมี API key
-NEWS_SOURCES: list[str] = ["rss", "sec", "gnews", "gdelt"]
+# ฉบับสาธารณะไม่มีแหล่ง yahoo และ gnews เพราะ robots.txt ของ query1/query2.finance.yahoo.com
+# และ news.google.com ไม่อนุญาตให้บอตอ่าน (ตรวจ 2026-11-25) ดู README หัวข้อแหล่งข้อมูล
+NEWS_SOURCES: list[str] = ["rss", "sec", "gdelt"]
 
 # ชื่อบริษัทที่ข่าวมักใช้แทน ticker — ใช้จับคู่ข่าวกับหุ้นจากพาดหัว
 # จับด้วยขอบเขตคำ (\b) ไม่ใช่ substring — ดู tag_tickers()
@@ -228,7 +227,8 @@ RSS_MAX_PER_FEED = 40
 
 # --- SEC EDGAR ---------------------------------------------------------------
 # SEC บังคับให้ User-Agent เป็น "ชื่อ อีเมล" ที่ติดต่อได้จริง ไม่งั้น HTTP 403
-SEC_USER_AGENT = "finbg-research you@example.com"
+# ตั้งเองผ่านตัวแปรแวดล้อม เช่น export FINBG_SEC_USER_AGENT="your-project you@your-domain.com"
+SEC_USER_AGENT = os.environ.get("FINBG_SEC_USER_AGENT", "").strip()
 SEC_MIN_INTERVAL_SEC = 0.15      # SEC อนุญาต ~10 req/s เราเว้นเผื่อไว้
 
 # เอาเฉพาะฟอร์มที่บอก "เหตุการณ์" จริง
@@ -347,14 +347,8 @@ LABEL_PRIMARY_TYPES: set[str] = {"primary"}
 LABEL_SECTOR_QUOTA = 6
 
 
-# --- Google News RSS (แทน Yahoo) ---------------------------------------------
-# ค้นรายบริษัท: ("ชื่อบริษัท" OR TICKER) stock when:2d — ฟรี ไม่ต้องมี key
-# จัดเป็น aggregator เพราะ Google รวบรวมมาจากหลายสำนัก (ลำดับความน่าเชื่อถือต่ำสุด)
-# ลิงก์เป็นลิงก์ของ Google ที่ redirect ไปบทความจริง — คงที่ ใช้เป็น key ได้
-GNEWS_ENDPOINT = "REMOVED in the public edition: news.google.com disallows automated access (robots.txt)"
-GNEWS_MAX_PER_QUERY = 15        # 24 บริษัท × 15 = เพดาน 360 ชิ้น/วัน ก่อนตัดซ้ำ
-GNEWS_MIN_INTERVAL_SEC = 1.5    # สุภาพกับเซิร์ฟเวอร์ — ไม่มีเอกสาร rate limit ทางการ
-GNEWS_WINDOW = "2d"
+# --- Google News RSS ---------------------------------------------------------
+# ไม่อยู่ในฉบับสาธารณะ: news.google.com ไม่อนุญาตให้บอตอ่าน (robots.txt, ตรวจ 2026-11-25)
 
 # --- ปฏิทินงบ + ประมาณการของนักวิเคราะห์ --------------------------------------
 # yfinance Ticker.calendar ให้วันประกาศงบครั้งถัดไป + ค่าเฉลี่ย EPS/รายได้ที่นักวิเคราะห์คาด
@@ -530,14 +524,8 @@ RAW_EARNINGS = RAW / "earnings_calendar"   # ปฏิทินงบทั้�
 OPPORTUNITIES = DATA / "opportunities"     # ไอเดีย กลุ่มควบคุม ผลลัพธ์ — สร้างย้อนหลังไม่ได้
 JOURNAL_OPPORTUNITIES = JOURNAL / "Opportunities"
 
-NASDAQ_SCREENER_URL = "REMOVED in the public edition: api.nasdaq.com disallows automated access (robots.txt)"
-NASDAQ_EARNINGS_URL = "REMOVED in the public edition: api.nasdaq.com disallows automated access (robots.txt)"
-# API ของ Nasdaq ไม่เป็นทางการ ต้องส่ง header แบบเบราว์เซอร์ — วันหนึ่งอาจเปลี่ยนแล้วพัง
-# ระบบจึงถือว่าเป็นขั้นตอนที่ "ขาดได้" (ส่วน SEC เป็นทางการ ทำงานต่อได้)
-BROWSER_HEADERS = {
-    "User-Agent": "REMOVED in the public edition",
-    "Accept": "application/json, text/plain, */*",
-}
+# Nasdaq screener และปฏิทินงบ: ไม่อยู่ในฉบับสาธารณะ เพราะ robots.txt ของ api.nasdaq.com
+# ไม่อนุญาตให้บอตอ่าน (ตรวจ 2026-11-25) ดู finbg/scan/universe.py และ finbg/datasource.py
 
 # universe: ซื้อขายได้จริงสำหรับรายย่อย — หุ้นจิ๋วตัดออก (spread กว้าง ต้นทุนกินกำไรหมด)
 SCAN_MIN_MCAP = 300e6

@@ -89,8 +89,7 @@ def effective_session(created_at: datetime, sessions: pd.DatetimeIndex) -> pd.Ti
 
 def _adjusted_closes(tickers: list[str], start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     """ราคาปรับแล้ว (ปันผล/แตกพาร์) ชุดใหม่ล่าสุดจาก Yahoo — ใช้ชุดเดียวกันทั้งวันเข้าและวันออก"""
-    import yfinance as yf
-
+    from ..datasource import yf
     frames = []
     for i in range(0, len(tickers), config.TH_CHUNK):
         batch = tickers[i:i + config.TH_CHUNK]

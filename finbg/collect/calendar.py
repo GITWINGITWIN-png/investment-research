@@ -34,8 +34,7 @@ def _jsonable(value: Any) -> Any:
 
 def collect(tickers: list[str] | None = None) -> dict[str, Any]:
     """ดึงปฏิทินของทุกหุ้นใน watchlist แล้วเก็บเป็น snapshot 1 ไฟล์"""
-    import yfinance as yf
-
+    from ..datasource import yf
     storage.ensure_dirs()
     targets = tickers or config.WATCHLIST
     rows: list[dict[str, Any]] = []

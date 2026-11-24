@@ -30,18 +30,18 @@ import re
 from typing import Any, Callable
 
 from .. import config, storage
-from .sources import gdelt, gnews, rss, sec, yahoo
+from .sources import gdelt, rss, sec
 
 # ลำดับความน่าเชื่อถือ ใช้ตัดสินว่าเก็บอันไหนเมื่อเจอข่าวซ้ำ
 TYPE_RANK = {"primary": 3, "outlet": 2, "aggregator": 1}
 
 SOURCES: dict[str, Callable[[], list[dict[str, Any]]]] = {
-    "yahoo": yahoo.fetch,
     "rss": rss.fetch,
     "sec": sec.fetch,
-    "gnews": gnews.fetch,
     "gdelt": gdelt.fetch,
 }
+# ฉบับสาธารณะไม่มีแหล่ง yahoo และ gnews: robots.txt ของ query1/query2.finance.yahoo.com
+# และ news.google.com ไม่อนุญาตให้บอตอ่าน (ตรวจ 2026-11-25) ดู README หัวข้อแหล่งข้อมูล
 
 
 def _title_key(title: str) -> str:

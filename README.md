@@ -1,15 +1,39 @@
 # finbg — ระบบวิจัยการลงทุนอัตโนมัติ
 
+**English summary:** an automated investment research system, built as a personal project. Code collects prices, news and SEC filings point-in-time. An LLM writes a weekly plan that code checks against fixed rules and runs on a paper portfolio next to a control. A whole-market scanner books ideas against a random control drawn from the same candidates. `finlab` is a research harness (rank IC, walk-forward, purged cross-validation, Deflated Sharpe ratio, PBO) whose first gate rejects random factors and catches a look-ahead factor. This public copy holds the code and docs only; see "ฉบับสาธารณะ" below for what stays private and which data sources are not included. Most of the text is in Thai.
+
 ระบบเก็บข้อมูล → ให้ LLM วางแผนการลงทุนรายสัปดาห์ → รันแผนบนพอร์ตกระดาษ → สืบสาเหตุทุกครั้งที่หุ้นที่จับตาผันผวนรุนแรง
 และ harness สำหรับทดสอบ algo กับข้อมูลย้อนหลังแบบไม่หลอกตัวเอง
 
-| ส่วน | ทำอะไร | อ่านเพิ่ม |
+| ส่วน | ทำอะไร | โน้ตออกแบบ (เก็บเป็นส่วนตัว) |
 |---|---|---|
-| **ข้อมูล** (`finbg/collect`) | ราคา 10 ปี · ข่าว 4 แหล่ง + label · งบ SEC XBRL · ปฏิทินงบ | [10 - Background Track](AI-Investing-Research/10%20-%20Background%20Track.md) |
-| **Portfolio Manager** (`finbg/pm`) | LLM เขียนแผนสัปดาห์ละครั้ง โค้ดตรวจกฎและรันบนพอร์ตกระดาษ เทียบ control | [11 - Weekly Portfolio Manager](AI-Investing-Research/11%20-%20Weekly%20Portfolio%20Manager.md) |
-| **เฝ้าระวัง** (`finbg/pm/volatility.py`, `watch.py`) | ทุกวัน: หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ + ตัดสินใจ · ทุกสัปดาห์: สรุป 8-K/ข่าวแรง/VIX | โน้ต 11 |
-| **สแกนทั้งตลาด** (`finbg/scan`) | หุ้นสหรัฐ ~3,000 ตัว + filing ของ SEC ทั้งหมด → โค้ดคัด 30 → Sonnet คัด ≤ 5 → Opus ดำลึก → พอร์ตไอเดียเทียบกลุ่มสุ่ม | [12 - Opportunity Scanner](AI-Investing-Research/12%20-%20Opportunity%20Scanner.md) |
-| **Harness** (`finlab`) | IC/ICIR, walk-forward, purged CV, Deflated Sharpe, PBO — ผ่านประตู 1 แล้ว | [09 - Evaluation Playbook](AI-Investing-Research/09%20-%20Evaluation%20Playbook.md) |
+| **ข้อมูล** (`finbg/collect`) | ราคา 10 ปี, ข่าว + label, งบ SEC XBRL และปฏิทินงบ | โน้ต 10 |
+| **Portfolio Manager** (`finbg/pm`) | LLM เขียนแผนสัปดาห์ละครั้ง โค้ดตรวจกฎและรันบนพอร์ตกระดาษ เทียบ control | โน้ต 11 |
+| **เฝ้าระวัง** (`finbg/pm/volatility.py`, `watch.py`) | ทุกวัน: หุ้นผันผวนรุนแรง → Claude สืบสาเหตุและตัดสินใจ ส่วนทุกสัปดาห์: สรุป 8-K/ข่าวแรง/VIX | โน้ต 11 |
+| **สแกนทั้งตลาด** (`finbg/scan`) | หุ้นสหรัฐ ~3,000 ตัว + filing ของ SEC ทั้งหมด → โค้ดคัด 30 → Sonnet คัด ≤ 5 → Opus ดำลึก → พอร์ตไอเดียเทียบกลุ่มสุ่ม | โน้ต 12 |
+| **Harness** (`finlab`) | IC/ICIR, walk-forward, purged CV, Deflated Sharpe, PBO — ผ่านประตู 1 แล้ว | โน้ต 09 |
+
+---
+
+## ฉบับสาธารณะ
+
+repo นี้คือฉบับที่เปิดให้ดู มีโค้ด สคริปต์ และคู่มือ แต่ไม่มีของต่อไปนี้
+
+- **เก็บเป็นส่วนตัว:** `Journal/` (brief รายวัน แผน คำทำนาย และผลสแกนที่ระบบสร้าง ซึ่งคัดข้อความข่าวมาด้วย), `AI-Investing-Research/` (โน้ตวิจัยและโน้ตออกแบบ 00–13) และบันทึกความคืบหน้า ข้อความ commit บางอันจึงเอ่ยถึงไฟล์ที่ไม่อยู่ใน copy นี้
+- **แหล่งข้อมูลที่ไม่ได้ใส่มา:** robots.txt ของ Yahoo Finance (query1/query2.finance.yahoo.com ที่ yfinance ใช้), api.nasdaq.com และ news.google.com (หน้าค้นหาแบบ RSS) ไม่อนุญาตให้บอตอ่าน (ตรวจ 2026-11-25) ฉบับนี้จึงไม่มีโค้ดที่อ่านสามแหล่งนี้ ทุกจุดที่เคยใช้ yfinance เรียกผ่าน [`finbg/datasource.py`](finbg/datasource.py) ซึ่งจะหยุดพร้อมคำอธิบายจนกว่าจะต่อแหล่งข้อมูลที่ได้รับอนุญาตเอง ส่วน scanner ให้คะแนนโดยไม่มีปฏิทินงบและข่าวรายบริษัท
+- **ที่ยังใช้ได้ตามกติกาของแต่ละแหล่ง:** SEC EDGAR (API ทางการ), GDELT DOC API, RSS ของ CNBC, MarketWatch, Fed และสื่อหุ้นไทย 4 แห่ง ส่วนตัวอ่านบทความไทยตรวจ robots.txt ทุกครั้งก่อนอ่าน
+
+### ตั้งค่า
+
+```bash
+uv sync
+export FINBG_SEC_USER_AGENT="your-project you@your-domain.com"   # SEC ขอชื่อและอีเมลที่ติดต่อได้ใน User-Agent
+export FINBG_BACKUP_DIR=/mnt/external/finbg                       # ไม่บังคับ: ปลายทางของ scripts/backup.sh
+```
+
+- **ชั้นตีความ:** เรียก `claude -p` แบบ headless จึงต้องมี Claude Code CLI ที่ล็อกอินแล้ว
+- **แจ้งเตือนบนมือถือ (ไม่บังคับ):** `uv run finbg notify setup` สร้าง topic ของ ntfy แล้วเก็บไว้ใน `data/` ในเครื่อง
+- **ตารางงาน:** สคริปต์ใน `scripts/` หาโฟลเดอร์ของ repo เองได้ แต่ `scripts/crontab.txt`, `scripts/anacrontab` และ hook ใน `scripts/label-loop-settings.json` ใช้ path เต็ม ให้แทน `/home/you/investment-research` ด้วยที่ที่ clone ไว้ก่อนติดตั้ง
 
 ---
 
@@ -19,7 +43,7 @@
 
 | ชั้น | ทำอะไร | ต้นทุน |
 |------|--------|--------|
-| **1. รวบรวมข้อเท็จจริง** (โค้ดล้วน) | ดึงราคา/ข่าว, คำนวณสถิติ, สร้างตาราง | ฟรี · ทำซ้ำได้เป๊ะ |
+| **1. รวบรวมข้อเท็จจริง** (โค้ดล้วน) | ดึงราคา/ข่าว, คำนวณสถิติ, สร้างตาราง | ฟรี และทำซ้ำได้เป๊ะ |
 | **2. ตีความ** (Claude) | เชื่อมโยง, ตั้งสมมติฐาน, ประเมินความเสี่ยง | ใช้ token เฉพาะตรงนี้ |
 
 เหตุผล: การให้ LLM นั่งคำนวณ % เปลี่ยนแปลง = เผา token กับงานที่ pandas ทำได้ฟรี
@@ -55,7 +79,7 @@ uv run finbg scan --dry-run     # สแกนทั้งตลาด ดู 10
 uv run finbg ideas              # พอร์ตไอเดีย: Claude vs สุ่ม vs ผู้เข้ารอบทั้งหมด + การทดสอบรอง (คะแนน Sonnet)
 
 uv run finbg th collect         # แทร็กไทย: เก็บรายชื่อ ราคา ข่าว ตาราง 59 (morning.sh เรียกทุกวัน) — โน้ต 13
-uv run finbg th status          # คลังไทยมีอะไรแล้ว · ข่าวครอบคลุมหุ้นที่ซื้อขายได้กี่ตัว/วัน
+uv run finbg th status          # คลังไทยมีอะไรแล้ว และข่าวครอบคลุมหุ้นที่ซื้อขายได้กี่ตัว/วัน
 uv run finbg th scan --dry-run  # scanner ไทย: ผู้เข้ารอบวันนี้ ไม่เรียกโมเดล
 uv run finbg th ideas           # พอร์ตไอเดียไทย: Claude vs สุ่ม + การทดสอบรอง
 
@@ -175,7 +199,7 @@ uv run finbg queue      # เรียงให้แล้ว ⏳ = เน่�
 | ทุกวัน (อัตโนมัติ) | เก็บข้อมูล + label ข่าว (L2) + พอร์ต PM + ตัดสินคำทำนาย | น้อย (label ~$0.5 เทียบเท่า) |
 | ทุกวัน (อัตโนมัติ) | หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (~2–3 ครั้ง/เดือน) | ~$0.2/ครั้ง เทียบเท่า |
 | ทุกสัปดาห์ (อัตโนมัติ) | แผนรายสัปดาห์ของ PM (L1) — เสาร์เช้า | กลาง (1 session) |
-| ทุกสัปดาห์ (คุณ) | อ่านแผนใน `Journal/Plans/` · ดูว่ามีอะไรค้านได้ไหม | 0 |
+| ทุกสัปดาห์ (คุณ) | อ่านแผนใน `Journal/Plans/` แล้วดูว่ามีอะไรค้านได้ไหม | 0 |
 | ทุกเดือน | ทดสอบ hypothesis 1 ใบด้วย `finlab` (L3) | หลัก |
 | เมื่อ token เหลือ | สรุป paper (L4) | เท่าไหร่ก็ได้ |
 
@@ -183,7 +207,7 @@ uv run finbg queue      # เรียงให้แล้ว ⏳ = เน่�
 
 เดิม L1 คือให้คนสั่ง Claude เติมบทวิเคราะห์ใน brief ทุกวัน — ผ่านไป 45 ฉบับ ไม่ได้เติมเลยสักฉบับ
 ตอนนี้ PM เขียนแผนเองสัปดาห์ละครั้ง (มีมุมมอง เหตุผล หลักฐาน คำทำนายที่ตัดสินได้)
-และ brief รายวันเป็นข้อเท็จจริงล้วน + สรุปแผนที่ใช้อยู่ — รายละเอียดที่ [โน้ต 11](AI-Investing-Research/11%20-%20Weekly%20Portfolio%20Manager.md)
+และ brief รายวันเป็นข้อเท็จจริงล้วน + สรุปแผนที่ใช้อยู่ — รายละเอียดอยู่ในโน้ต 11 (เก็บเป็นส่วนตัว)
 
 ### L2 — labeled corpus (สินทรัพย์ที่ซื้อไม่ได้)
 
@@ -197,8 +221,8 @@ uv run finbg label ingest         # 3. ตรวจ + เก็บ — ฟรี
 โมเดลรู้ผลลัพธ์ไปแล้ว → `novelty` (ใหม่จริงหรือย้ำของเดิม) ปนเปื้อน hindsight
 ฟิลด์ `days_after_publish` บันทึกไว้ให้กรองทิ้งได้ทีหลังถ้า label ช้าเกินไป
 
-schema v1: `regime` · `novelty` · `topic` + `topic_free` · `horizon` ·
-`materiality` · `entities[]` · `rationale`
+schema v1: `regime`, `novelty`, `topic` + `topic_free`, `horizon`,
+`materiality`, `entities[]` และ `rationale`
 แก้ schema ที่ [`finbg/labels.py`](finbg/labels.py) ที่เดียว — prompt และ validator สร้างจากตรงนั้น
 
 ---
@@ -237,15 +261,16 @@ tail -20 data/logs/plan-$(date +%Y-%m).log
 finbg/
   config.py          ค่าตั้งทั้งหมดอยู่ที่เดียว (รวม mandate ของ PM และเกณฑ์แจ้งเตือน)
   storage.py         ชั้นเก็บข้อมูล + บังคับ fetched_at ทุกไฟล์
-  market.py          เวลาตลาดสหรัฐ: แท่งที่ปิดแล้ว · แผนมีผลเมื่อไหร่
+  market.py          เวลาตลาดสหรัฐ: แท่งที่ปิดแล้ว และแผนมีผลเมื่อไหร่
   ledger.py          paper baseline 3 กลยุทธ์
   headless.py        เรียก Claude แบบไม่มีเครื่องมือ ได้ JSON ตาม schema
-  notify.py          แจ้งเตือน (เดสก์ท็อป · ntfy ถ้าเปิด)
+  notify.py          แจ้งเตือน (เดสก์ท็อป และ ntfy ถ้าเปิด)
   journal.py         สร้าง prediction / hypothesis
   cli.py             จุดเข้าใช้งาน
+  datasource.py      แหล่งราคาของฉบับสาธารณะ: ยังไม่มี ต้องต่อเอง (ดูหัวข้อฉบับสาธารณะ)
   collect/
-    prices.py        yfinance (+ ดึงย้อนหลังให้ ticker ที่ประวัติสั้น)
-    news.py          รวมข่าวจาก sources/ (rss · sec · gnews · gdelt)
+    prices.py        ราคา (+ ดึงย้อนหลังให้ ticker ที่ประวัติสั้น) ผ่าน datasource.py
+    news.py          รวมข่าวจาก sources/ (rss, sec และ gdelt)
     calendar.py      วันประกาศงบ + ประมาณการนักวิเคราะห์ (snapshot รายวัน)
     fundamentals.py  งบ SEC XBRL แบบ point-in-time → TTM, margin, P/E, FCF
   pm/                Portfolio Manager — ดูโน้ต 11
@@ -257,10 +282,9 @@ finbg/
     volatility.py    ทุกวัน: หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ + ตัดสินใจ
     watch.py         ทุกสัปดาห์: สรุป 8-K/ข่าวแรง/VIX ก่อนออกแผน
   scan/              สแกนทั้งตลาด — ดูโน้ต 12
-    universe.py      หุ้นทั้งตลาดจาก Nasdaq screener (snapshot รายวัน)
+    universe.py      หุ้นทั้งตลาด (snapshot รายวัน) แหล่งรายชื่อต้องต่อเอง
     panel.py         ประวัติราคาของ universe กว้าง (ฐานของ "ผิดปกติ")
-    filings.py       SEC: index รายวัน · หัวข้อ 8-K · Form 4 · 13D · เนื้อข่าว 8-K
-    earnings.py      ปฏิทินงบทั้งตลาด + EPS จริง/คาด + จำนวนนักวิเคราะห์
+    filings.py       SEC: index รายวัน, หัวข้อ 8-K, Form 4, 13D และเนื้อข่าว 8-K
     score.py         ชั้น 1: คะแนนความผิดปกติ × ตัวคูณ "คนมองข้าม"
     triage.py        ชั้น 2: Sonnet คัดกรอง
     deepdive.py      ชั้น 3: Opus ดำลึก
@@ -282,13 +306,13 @@ data/
   plans/                   แผนที่ผ่านการตรวจ + requests/ (พรอมต์จริง) + resolutions.jsonl
   alerts/                  ประวัติการแจ้งเตือน
   investigations/          ผลสืบเหตุการณ์ผันผวน + ข้อมูลที่ Claude ได้อ่าน
-  opportunities/           พอร์ตไอเดีย · กลุ่มควบคุม · ผลจริง · requests/ (ข้อความที่โมเดลได้อ่าน)
-  raw/screener/ · raw/sec_index/ · raw/sec_events/ · raw/insider/ · raw/earnings_calendar/   ข้อมูลดิบทั้งตลาด
+  opportunities/           พอร์ตไอเดีย, กลุ่มควบคุม, ผลจริง และ requests/ (ข้อความที่โมเดลได้อ่าน)
+  raw/screener/, raw/sec_index/, raw/sec_events/, raw/insider/, raw/earnings_calendar/   ข้อมูลดิบทั้งตลาด
   research/                ราคาของ universe วิจัย + experiments.jsonl (ดาวน์โหลดใหม่ได้)
   derived/                 คำนวณใหม่ได้เสมอ ลบทิ้งได้ (รวม pm_ledger.parquet)
   logs/                    log ของงานอัตโนมัติ
 
-Journal/                   โฟลเดอร์ที่ Obsidian อ่าน
+Journal/                   โฟลเดอร์ที่ Obsidian อ่าน (ระบบสร้างตอนรัน ไม่อยู่ใน copy นี้)
   Briefs/                  situation brief รายวัน
   Plans/                   แผนรายสัปดาห์ของ PM
   Alerts/                  การแจ้งเตือนรายวัน
@@ -311,10 +335,9 @@ Journal/                   โฟลเดอร์ที่ Obsidian อ่า�
 
 ---
 
-## แหล่งข่าว — 4 แหล่ง ไม่ต้องใช้ API key เลย
+## แหล่งข่าว: 3 แหล่ง ไม่ต้องใช้ API key
 
-> [!note] เปลี่ยน 2026-10-24: ปิด `yahoo` (คืนค่าว่างทุกวันทั้ง yfinance 1.5.2 และ 1.7.0)
-> แทนด้วย `gnews` — Google News RSS ค้นรายบริษัททั้ง 24 ตัว (aggregator, ≤ 15 ชิ้น/บริษัท/วัน)
+> [!note] ฉบับสาธารณะไม่มี `yahoo` และ `gnews` (Google News RSS ค้นรายบริษัท) เพราะ robots.txt ของทั้งสองไม่อนุญาตให้บอตอ่าน
 > SEC ได้หัวข้อ 8-K (Item) ในพาดหัว และใช้เวลาที่ SEC รับเอกสารจริงแทนวันที่ยื่น
 
 ออกแบบให้ **แหล่งหนึ่งล้มไม่กระทบแหล่งอื่น** (แต่ละ source ห่อด้วย try/except แยกกัน)
@@ -322,7 +345,6 @@ Journal/                   โฟลเดอร์ที่ Obsidian อ่า�
 
 | แหล่ง | ชนิด | จุดแข็ง | จุดอ่อน |
 |-------|------|---------|---------|
-| `yahoo` | outlet | ปริมาณดี เร็ว ใช้ dep ที่มีอยู่ | ปนบทความชวนคลิก · **ผูก ticker มั่ว** |
 | `rss` | outlet + **primary** | เสถียรสุด แทบไม่มี rate limit | จำนวนจำกัด |
 | `sec` | **primary** | **8-K = เหตุการณ์สำคัญตามกฎหมาย** | ไม่ใช่ "ข่าว" |
 | `gdelt` | aggregator | กว้างสุด นานาชาติ | rate limit เข้มมาก |
@@ -330,7 +352,7 @@ Journal/                   โฟลเดอร์ที่ Obsidian อ่า�
 เปิด/ปิดแหล่งได้ที่ `NEWS_SOURCES` ใน `config.py` หรือชั่วคราว:
 
 ```bash
-uv run finbg news --sources yahoo,rss,sec    # ข้าม gdelt
+uv run finbg news --sources rss,sec    # ข้าม gdelt
 ```
 
 ### `source_type` สำคัญกว่าที่คิด
@@ -358,8 +380,8 @@ uv run finbg news --sources yahoo,rss,sec    # ข้าม gdelt
 ### GDELT rate limit
 
 จากการทดสอบ: ยิงห่าง 6 วินาทียังโดน HTTP 429 และเมื่อโดนแล้วติดค้างนานหลายสิบนาที
-ระบบจึงเว้น **15 วินาที** · รวมคำค้นด้วย `OR` เหลือ **4 requests/วัน** ·
-มี **circuit breaker** (คำแรกไม่ผ่าน หยุดทั้งรอบ) · **เพดานเวลา 240 วินาที**
+ระบบจึงเว้น **15 วินาที**, รวมคำค้นด้วย `OR` เหลือ **4 requests/วัน**,
+มี **circuit breaker** (คำแรกไม่ผ่าน หยุดทั้งรอบ) และ**เพดานเวลา 240 วินาที**
 
 ถ้าอยากได้ปริมาณมากกว่านี้ GDELT แนะนำ BigQuery แทน DOC API
 
@@ -371,7 +393,7 @@ uv run finbg news --sources yahoo,rss,sec    # ข้าม gdelt
 
 | สำรอง | เพราะ |
 |-------|-------|
-| `data/raw/` | ราคาที่ปรับแล้วเปลี่ยนย้อนหลัง · URL ข่าวเน่าตามเวลา |
+| `data/raw/` | ราคาที่ปรับแล้วเปลี่ยนย้อนหลัง และ URL ข่าวเน่าตามเวลา |
 | `data/labels/` | label ที่ทำย้อนหลัง = ปนเปื้อน hindsight |
 | `data/plans/` | แผนรายสัปดาห์ + พรอมต์ที่ใช้จริง + ผลคำทำนาย = track record ของ PM |
 | `data/alerts/` | ประวัติการแจ้งเตือน (เหตุผลของทุก replan) |
@@ -393,3 +415,7 @@ uv run finbg news --sources yahoo,rss,sec    # ข้าม gdelt
 
 สคริปต์ **ไม่ใช้ `--delete`** โดยตั้งใจ — ถ้าไฟล์ต้นทางหายเพราะอุบัติเหตุ
 สำเนาสำรองต้องยังอยู่
+
+---
+
+Built with help from AI coding assistants.

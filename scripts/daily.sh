@@ -7,7 +7,7 @@
 
 set -uo pipefail
 
-PROJECT_DIR="/home/you/investment-research"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"   # the folder this repo was cloned to
 LOG_DIR="${PROJECT_DIR}/data/logs"
 LOG_FILE="${LOG_DIR}/daily-$(date +%Y-%m).log"
 

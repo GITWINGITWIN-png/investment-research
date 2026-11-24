@@ -128,8 +128,7 @@ def _save_state(state: dict[str, Any]) -> None:
 
 def fetch_prices(tickers: list[str]) -> dict[str, pd.DataFrame]:
     """ราคา 1 ปีชุดใหม่ (ปรับแตกพาร์/ปันผลสม่ำเสมอ) + volume + การแตกพาร์ — ตัดแท่งที่ตลาดยังไม่ปิด"""
-    import yfinance as yf
-
+    from ..datasource import yf
     from .. import market
 
     raw = yf.download(sorted(set(tickers)), period="1y", auto_adjust=False, actions=True,

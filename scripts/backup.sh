@@ -14,7 +14,7 @@
 
 set -uo pipefail
 
-PROJECT_DIR="/home/you/investment-research"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"   # the folder this repo was cloned to
 
 # ⚠️ ค่าเริ่มต้นอยู่บนดิสก์เดียวกัน = กันลบพลาดได้ แต่กันดิสก์พังไม่ได้
 # ควรเปลี่ยนเป็น external drive หรือ remote (เช่น user@host:/path หรือ rclone)

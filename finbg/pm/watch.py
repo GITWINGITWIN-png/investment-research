@@ -65,8 +65,7 @@ def _alert(key: str, severity: str, title: str, detail: str, tickers: list[str],
 def check_prices(satellite: dict[str, float], triggers: list[dict[str, Any]], plan_id: str | None,
                  known_through: str | None = None) -> list[dict[str, Any]]:
     """`known_through` = วันที่ราคาล่าสุดที่แผนปัจจุบันเห็นแล้ว — แท่งก่อนหน้านั้นไม่นับเป็นเหตุการณ์ใหม่"""
-    import yfinance as yf
-
+    from ..datasource import yf
     watch = sorted(set(satellite) | {"SPY", "^VIX"} | {t["ticker"] for t in triggers})
     raw = yf.download(watch, period="4mo", interval="1d", auto_adjust=False, progress=False, threads=True)
     if raw.empty:

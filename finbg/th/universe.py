@@ -36,9 +36,8 @@ _FUND = re.compile(r"\bfund\b|reit|real estate investment trust|leasehold|infras
 
 def fetch_quotes() -> list[dict[str, Any]]:
     """ทุกหลักทรัพย์ที่ Yahoo ระบุว่าซื้อขายใน SET (รวม mai) — ทีละ 250 ตามที่ screener ยอม"""
-    import yfinance as yf
-    from yfinance import EquityQuery
-
+    from ..datasource import yf
+    from ..datasource import EquityQuery
     query = EquityQuery("eq", ["exchange", "SET"])
     quotes: list[dict[str, Any]] = []
     offset = 0

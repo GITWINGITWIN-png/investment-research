@@ -103,8 +103,7 @@ def _entries() -> list[dict[str, Any]]:
 
 def resolve(now: datetime | None = None) -> dict[str, Any]:
     """คิดผลของทุกรายการที่ครบ 20 วันทำการแล้ว (ราคาปรับแล้วจาก yfinance ชุดใหม่)"""
-    import yfinance as yf
-
+    from ..datasource import yf
     done = {r["id"] for r in _read(RESOLUTIONS)}
     sessions = market.sessions_from_prices(storage.price_matrix("adj_close"))
     due = []

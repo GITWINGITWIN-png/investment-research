@@ -35,8 +35,7 @@ def _save(df: pd.DataFrame) -> None:
 
 def _download(batch: list[str], period: str) -> tuple[pd.DataFrame, list[str]]:
     """ดึงหนึ่งก้อน คืน (ตารางยาว, ticker ที่ไม่ได้ข้อมูล)"""
-    import yfinance as yf
-
+    from ..datasource import yf
     raw = yf.download(batch, period=period, auto_adjust=True, progress=False, threads=True)
     if raw.empty:
         return pd.DataFrame(), list(batch)
@@ -92,8 +91,7 @@ def update_recent(tickers: list[str], period: str = "10d", chunk: int = 150) -> 
 
 def backfill(tickers: list[str], period: str = "9mo", chunk: int = 150) -> dict[str, int]:
     """ดึงประวัติให้ ticker ที่ยังมีน้อยกว่า 60 วัน — ทีละก้อน เว้นจังหวะกัน rate limit"""
-    import yfinance as yf
-
+    from ..datasource import yf
     panel = load()
     counts = panel.groupby("ticker").size() if not panel.empty else pd.Series(dtype=int)
     todo = [t for t in tickers if counts.get(t, 0) < 60][: config.SCAN_BACKFILL_PER_RUN]

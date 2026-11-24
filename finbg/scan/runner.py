@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -14,8 +13,7 @@ import pandas as pd
 
 from .. import config, market, notify, storage
 from ..collect import fundamentals as fundamentals_module
-from ..collect.sources import gnews
-from . import book, deepdive, earnings, filings, panel, score, triage, universe
+from . import book, deepdive, filings, panel, score, triage, universe
 
 STATE = config.OPPORTUNITIES / "state.json"
 REQUESTS = config.OPPORTUNITIES / "requests"
@@ -183,7 +181,9 @@ def run(*, dry_run: bool = False, no_llm: bool = False, force: bool = False) -> 
     sec = [filings.collect_day(day, ciks, seen) for day in filings.recent_sessions_back(session, 2)]
     events = filings.events_since(session - timedelta(days=4))
     insider = score.insider_summary(filings.insider_history(session - timedelta(days=config.INSIDER_LOOKBACK_DAYS)))
-    calendar = earnings.collect(session)
+    # Public edition: the earnings calendar came from api.nasdaq.com, whose robots.txt disallows
+    # automated access, so this copy scores without surprise and analyst-count inputs.
+    calendar: dict[str, list[dict[str, Any]]] = {"reported": [], "upcoming": []}
     coverage = {r["ticker"]: r["n_estimates"] for r in calendar["reported"] + calendar["upcoming"]
                 if r["n_estimates"] is not None}
     reported = [r for r in calendar["reported"] if r["report_date"] >= (session - timedelta(days=3)).isoformat()]
@@ -216,11 +216,9 @@ def run(*, dry_run: bool = False, no_llm: bool = False, force: bool = False) -> 
 
     if candidates and not no_llm:
         # ── ชั้น 2: Sonnet คัดกรอง ──────────────────────────────────────
+        # Public edition: per-company news came from Google News RSS search, which
+        # news.google.com disallows for automated clients, so the cards carry no news.
         news: dict[str, list[dict[str, Any]]] = {}
-        for i, c in enumerate(candidates):
-            if i:
-                time.sleep(config.GNEWS_MIN_INTERVAL_SEC)
-            news[c["ticker"]] = gnews.search_company(c["ticker"], c["name"])
         excerpts = {}
         for c in candidates:
             filing = next((e for e in c.get("events") or [] if e["kind"] == "8-K"), None)

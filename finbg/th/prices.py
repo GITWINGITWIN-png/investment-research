@@ -36,8 +36,7 @@ def drop_incomplete(df: pd.DataFrame, now: datetime | None = None) -> tuple[pd.D
 
 def download(symbols: list[str], period: str) -> tuple[pd.DataFrame, list[str]]:
     """ดึงทีละก้อน (TH_CHUNK ตัว) เว้นจังหวะระหว่างก้อน — คืน (ตารางยาว, ตัวที่ดึงไม่ได้)"""
-    import yfinance as yf
-
+    from ..datasource import yf
     frames, failed = [], []
     for start in range(0, len(symbols), config.TH_CHUNK):
         batch = symbols[start:start + config.TH_CHUNK]

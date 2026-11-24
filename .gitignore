@@ -24,3 +24,6 @@ docs/*.out
 docs/*.xdv
 docs/*.fls
 docs/*.fdb_latexmk
+
+# ฉบับสาธารณะ: brief แผน และผลสแกนที่ระบบสร้างตอนรัน เก็บไว้ในเครื่อง
+Journal/

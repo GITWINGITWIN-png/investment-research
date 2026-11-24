@@ -20,7 +20,8 @@ import json
 import os
 import sys
 
-ALLOWED_PREFIX = "/home/you/investment-research/data/queue/"
+# data/queue/ inside the folder this repo was cloned to
+ALLOWED_PREFIX = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "data", "queue") + os.sep
 
 
 def decide(payload: dict) -> tuple[str, str]:
