@@ -1,421 +1,71 @@
-# finbg — ระบบวิจัยการลงทุนอัตโนมัติ
+# investment-research
 
-**English summary:** an automated investment research system, built as a personal project. Code collects prices, news and SEC filings point-in-time. An LLM writes a weekly plan that code checks against fixed rules and runs on a paper portfolio next to a control. A whole-market scanner books ideas against a random control drawn from the same candidates. `finlab` is a research harness (rank IC, walk-forward, purged cross-validation, Deflated Sharpe ratio, PBO) whose first gate rejects random factors and catches a look-ahead factor. This public copy holds the code and docs only; see "ฉบับสาธารณะ" below for what stays private and which data sources are not included. Most of the text is in Thai.
+A personal system for researching US and Thai stocks without fooling myself. Code collects prices, news and SEC filings as point-in-time snapshots. An LLM writes a weekly plan, and code checks the plan against fixed rules and runs it on a paper portfolio next to a passive control. A whole-market scanner books its ideas against a random control drawn from the same candidates, so the question it answers is whether the LLM picks better than chance.
 
-ระบบเก็บข้อมูล → ให้ LLM วางแผนการลงทุนรายสัปดาห์ → รันแผนบนพอร์ตกระดาษ → สืบสาเหตุทุกครั้งที่หุ้นที่จับตาผันผวนรุนแรง
-และ harness สำหรับทดสอบ algo กับข้อมูลย้อนหลังแบบไม่หลอกตัวเอง
+`finlab` is the research harness: rank IC, walk-forward splits, purged cross-validation with an embargo, the Deflated Sharpe ratio and PBO. Its first gate checks the harness itself. Twenty random factors must come out as noise, and a factor that secretly uses future returns must be caught.
 
-| ส่วน | ทำอะไร | โน้ตออกแบบ (เก็บเป็นส่วนตัว) |
-|---|---|---|
-| **ข้อมูล** (`finbg/collect`) | ราคา 10 ปี, ข่าว + label, งบ SEC XBRL และปฏิทินงบ | โน้ต 10 |
-| **Portfolio Manager** (`finbg/pm`) | LLM เขียนแผนสัปดาห์ละครั้ง โค้ดตรวจกฎและรันบนพอร์ตกระดาษ เทียบ control | โน้ต 11 |
-| **เฝ้าระวัง** (`finbg/pm/volatility.py`, `watch.py`) | ทุกวัน: หุ้นผันผวนรุนแรง → Claude สืบสาเหตุและตัดสินใจ ส่วนทุกสัปดาห์: สรุป 8-K/ข่าวแรง/VIX | โน้ต 11 |
-| **สแกนทั้งตลาด** (`finbg/scan`) | หุ้นสหรัฐ ~3,000 ตัว + filing ของ SEC ทั้งหมด → โค้ดคัด 30 → Sonnet คัด ≤ 5 → Opus ดำลึก → พอร์ตไอเดียเทียบกลุ่มสุ่ม | โน้ต 12 |
-| **Harness** (`finlab`) | IC/ICIR, walk-forward, purged CV, Deflated Sharpe, PBO — ผ่านประตู 1 แล้ว | โน้ต 09 |
+## What this copy leaves out
 
----
+This is the public copy of a private project.
 
-## ฉบับสาธารณะ
+- No price source. robots.txt on Yahoo Finance (query1 and query2.finance.yahoo.com, which yfinance uses), api.nasdaq.com and Google News RSS search disallows bots (checked 25 November 2026), so the code that read them is gone. Every price call goes through `finbg/datasource.py`, which stops with an explanation until you plug in a source you are allowed to use. Without one, the modules import and the CLIs run, but the daily pipeline cannot fetch prices.
+- No generated output or private notes. The daily briefs, weekly plans, predictions, scan results and design notes stay on my machine, so some commit messages mention files that are not here.
+- Thai stays where the tools need it: the text they write for a Thai reader, the LLM prompts and the Thai keyword lists.
 
-repo นี้คือฉบับที่เปิดให้ดู มีโค้ด สคริปต์ และคู่มือ แต่ไม่มีของต่อไปนี้
+The sources still in use follow each site's rules: SEC EDGAR (official API), the GDELT DOC API, RSS from CNBC, MarketWatch, the Fed and four Thai stock-news sites. The Thai article reader checks robots.txt before every page.
 
-- **เก็บเป็นส่วนตัว:** `Journal/` (brief รายวัน แผน คำทำนาย และผลสแกนที่ระบบสร้าง ซึ่งคัดข้อความข่าวมาด้วย), `AI-Investing-Research/` (โน้ตวิจัยและโน้ตออกแบบ 00–13) และบันทึกความคืบหน้า ข้อความ commit บางอันจึงเอ่ยถึงไฟล์ที่ไม่อยู่ใน copy นี้
-- **แหล่งข้อมูลที่ไม่ได้ใส่มา:** robots.txt ของ Yahoo Finance (query1/query2.finance.yahoo.com ที่ yfinance ใช้), api.nasdaq.com และ news.google.com (หน้าค้นหาแบบ RSS) ไม่อนุญาตให้บอตอ่าน (ตรวจ 2026-11-25) ฉบับนี้จึงไม่มีโค้ดที่อ่านสามแหล่งนี้ ทุกจุดที่เคยใช้ yfinance เรียกผ่าน [`finbg/datasource.py`](finbg/datasource.py) ซึ่งจะหยุดพร้อมคำอธิบายจนกว่าจะต่อแหล่งข้อมูลที่ได้รับอนุญาตเอง ส่วน scanner ให้คะแนนโดยไม่มีปฏิทินงบและข่าวรายบริษัท
-- **ที่ยังใช้ได้ตามกติกาของแต่ละแหล่ง:** SEC EDGAR (API ทางการ), GDELT DOC API, RSS ของ CNBC, MarketWatch, Fed และสื่อหุ้นไทย 4 แห่ง ส่วนตัวอ่านบทความไทยตรวจ robots.txt ทุกครั้งก่อนอ่าน
-
-### ตั้งค่า
+## Setup
 
 ```bash
 uv sync
-export FINBG_SEC_USER_AGENT="your-project you@your-domain.com"   # SEC ขอชื่อและอีเมลที่ติดต่อได้ใน User-Agent
-export FINBG_BACKUP_DIR=/mnt/external/finbg                       # ไม่บังคับ: ปลายทางของ scripts/backup.sh
+export FINBG_SEC_USER_AGENT="your-project you@your-domain.com"   # the SEC requires a name and a reachable email
+export FINBG_BACKUP_DIR=/mnt/external/finbg                       # optional: where scripts/backup.sh writes
 ```
 
-- **ชั้นตีความ:** เรียก `claude -p` แบบ headless จึงต้องมี Claude Code CLI ที่ล็อกอินแล้ว
-- **แจ้งเตือนบนมือถือ (ไม่บังคับ):** `uv run finbg notify setup` สร้าง topic ของ ntfy แล้วเก็บไว้ใน `data/` ในเครื่อง
-- **ตารางงาน:** สคริปต์ใน `scripts/` หาโฟลเดอร์ของ repo เองได้ แต่ `scripts/crontab.txt`, `scripts/anacrontab` และ hook ใน `scripts/label-loop-settings.json` ใช้ path เต็ม ให้แทน `/home/you/investment-research` ด้วยที่ที่ clone ไว้ก่อนติดตั้ง
+The interpretation steps call `claude -p` headless, so they need a logged-in Claude Code CLI. Phone alerts are optional: `uv run finbg notify setup` creates an ntfy topic. The scheduling files (`scripts/crontab.txt`, `scripts/anacrontab`, `scripts/label-loop-settings.json`) use absolute paths; replace `/home/you/investment-research` with your clone before installing them.
 
----
+## How it is organised
 
-## แนวคิดหลัก
+The work is split into two layers. Code gathers and computes the facts, which is free and exactly repeatable. The LLM only interprets, so tokens go where a model does better than pandas.
 
-แยกงานเป็น 2 ชั้นอย่างเด็ดขาด:
-
-| ชั้น | ทำอะไร | ต้นทุน |
-|------|--------|--------|
-| **1. รวบรวมข้อเท็จจริง** (โค้ดล้วน) | ดึงราคา/ข่าว, คำนวณสถิติ, สร้างตาราง | ฟรี และทำซ้ำได้เป๊ะ |
-| **2. ตีความ** (Claude) | เชื่อมโยง, ตั้งสมมติฐาน, ประเมินความเสี่ยง | ใช้ token เฉพาะตรงนี้ |
-
-เหตุผล: การให้ LLM นั่งคำนวณ % เปลี่ยนแปลง = เผา token กับงานที่ pandas ทำได้ฟรี
-และยังเสี่ยงคำนวณผิด **ชั้นที่ 1 บีบข้อมูลให้เหลือแต่แก่นก่อน แล้วค่อยส่งให้ชั้นที่ 2**
-
----
-
-## คำสั่ง
-
-```bash
-uv run finbg daily               # งานประจำวัน (cron เรียกอันนี้)
-uv run finbg daily --skip-news   # เร็วกว่ามาก ถ้าไม่ต้องการข่าว
-
-uv run finbg prices              # ดึงราคาอย่างเดียว
-uv run finbg news                # ดึงข่าวอย่างเดียว
-uv run finbg ledger              # คำนวณ paper baseline ใหม่
-uv run finbg brief               # สร้าง situation brief
-uv run finbg status              # ดูว่าคลังข้อมูลโตแค่ไหน
-
-uv run finbg predict "หัวข้อ" --horizon 90 --confidence 60
-uv run finbg hypo "หัวข้อ" --cost low
-
-uv run finbg plan status        # แผนปัจจุบัน + ผลงานเทียบ control
-uv run finbg plan run           # ออกแผนรายสัปดาห์ (ปกติออกเองเช้าวันเสาร์)
-uv run finbg plan run --dry-run # ดูพรอมต์ที่ PM จะได้อ่าน โดยไม่เรียกโมเดล
-uv run finbg plan replan --reason "..."  # วางแผนใหม่เอง
-uv run finbg volatility --dry-run        # หุ้นตัวไหนผันผวนเข้าเกณฑ์ (ไม่เรียก Claude)
-uv run finbg volatility --ticker GE      # สั่ง Claude สืบสาเหตุเองเฉพาะตัว
-uv run finbg watch --dry-run    # สรุป 8-K/ข่าวแรง/VIX ตอนนี้
-uv run finbg notify setup       # (เลือกเปิด) แจ้งเตือนบนมือถือผ่าน ntfy
-
-uv run finbg scan --dry-run     # สแกนทั้งตลาด ดู 10 อันดับแรก ไม่เรียกโมเดล
-uv run finbg ideas              # พอร์ตไอเดีย: Claude vs สุ่ม vs ผู้เข้ารอบทั้งหมด + การทดสอบรอง (คะแนน Sonnet)
-
-uv run finbg th collect         # แทร็กไทย: เก็บรายชื่อ ราคา ข่าว ตาราง 59 (morning.sh เรียกทุกวัน) — โน้ต 13
-uv run finbg th status          # คลังไทยมีอะไรแล้ว และข่าวครอบคลุมหุ้นที่ซื้อขายได้กี่ตัว/วัน
-uv run finbg th scan --dry-run  # scanner ไทย: ผู้เข้ารอบวันนี้ ไม่เรียกโมเดล
-uv run finbg th ideas           # พอร์ตไอเดียไทย: Claude vs สุ่ม + การทดสอบรอง
-
-uv run finlab gate              # ตรวจ harness: ปฏิเสธ factor ปลอมได้ไหม
-uv run finlab eval momentum_12_1
-uv run finlab thai-prices       # ราคา 10 ปีของหุ้นไทยสำหรับงานวิจัย
-uv run finlab thai              # factor ช้าในหุ้นไทยที่ซื้อขายได้จริง หักต้นทุนตาม tick
-
-uv run finbg queue              # ← token เหลือ ใช้ทำอะไรดี
-uv run finbg label prepare      # เตรียม batch (ฟรี)
-uv run finbg label ingest       # เก็บผล + ตรวจความถูกต้อง (ฟรี)
-uv run finbg label stats        # provenance + คำเตือน drift/hindsight
-uv run finbg label backfill --dry-run   # ซ่อม days_after_publish ที่หายไป
-```
-
----
-
-## 📘 ไม่เข้าใจว่าทั้งหมดนี้คืออะไร — เริ่มที่คู่มือ
-
-[`docs/guide.pdf`](docs/guide.pdf) — 22 หน้า อธิบายตั้งแต่ "หุ้นคืออะไร"
-ถึงเหตุผลเบื้องหลังทุกการตัดสินใจในโปรเจกต์ สำหรับคนที่ไม่เคยลงทุนมาก่อนเลย
-
-```bash
-uv run python scripts/make-figures.py      # สร้างกราฟ 8 รูปจากข้อมูลจริง
-cd docs && xelatex guide.tex && xelatex guide.tex   # คอมไพล์ (รันสองรอบให้สารบัญถูก)
-```
-
-ต้องมี XeLaTeX + ฟอนต์ตระกูล TLWG (`fonts-tlwg`) — ฟอนต์ไทยหลายตัวเช่น Noto Serif Thai
-ไม่มี glyph ภาษาอังกฤษ คำอังกฤษที่ปนในประโยคไทยจะกลายเป็นกล่องว่าง
-
----
-
-## 🤖 Label อัตโนมัติ — ทำงานเองทุกวัน ไม่ต้องเปิด session ทิ้งไว้
-
-```
-ครั้งแรกที่เครื่องเปิดของวัน (anacron)  →  scripts/morning.sh
-    daily.sh       เก็บราคา + ข่าว + ปฏิทินงบ + งบ (ถ้าถึงรอบ) + ledger + brief
-    label-auto.sh  มีข่าวรอไหม? (0 token) → ถ้ามี เปิด claude -p แบบ headless
-    finbg volatility   หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (0 token ถ้าไม่มี)
-    finbg scan         สแกนทั้งตลาด → ≤ 5 ไอเดีย/วัน เข้าพอร์ตไอเดีย (โน้ต 12)
-    finbg watch --weekly + finbg plan run   เฉพาะวันออกแผน (ปกติคือเช้าวันเสาร์)
-```
-
-ปิด Claude Code ปิดหน้าจอได้ตามปกติ — cron ของระบบเป็นคนเรียก ไม่ผูกกับ session ใด
-
-**ทำไมเปลี่ยนจาก cron 06:00 เป็น anacron (2026-10-24):** เดิมถ้าเครื่องปิดตอน 06:00
-งานวันนั้นหายทั้งวัน — เกิดจริง 27 จาก 59 วันทำการ และข่าวย้อนหลังเก็บไม่ได้
-anacron จำว่าวันนี้รันแล้วหรือยัง แล้วรันให้ตอนเปิดเครื่อง (ถ้าเครื่องเปิดค้างไว้ก็รัน 05:05)
-
-**ทำไมไม่ใช้ CronCreate ในตัว Claude Code:** งานนั้นอยู่ในหน่วยความจำของ session
-ปิด session แล้วหาย ทำงานเฉพาะตอน REPL ว่าง และหมดอายุเองใน 7 วัน
-
-### ตรวจตอนเช้า
-
-```bash
-tail -20 data/logs/label-$(date +%Y-%m).log
-```
-
-| บรรทัด | ความหมาย |
+| Part | What it does |
 |---|---|
-| `SUMMARY rounds=2 accepted=29 ... note=ok` | ปกติ |
-| `⏭️ ไม่มีข่าวรอ label` | ปกติ — ไม่มีงานก็ไม่เปิด session |
-| `🚨 ถูกปฏิเสธสิทธิ์ N ครั้ง` | **ต้องดู** มีอะไรพยายามออกนอกกรง |
-| `🚨 โมเดลไม่ตรง!` | **ต้องดู** label รอบนั้นปนเปื้อน provenance |
+| `finbg/collect` | Prices, news from several sources, SEC XBRL financials and the earnings calendar, all stored with `fetched_at` |
+| `finbg/pm` | The weekly plan: the LLM chooses the satellite part of a 70/30 core-satellite portfolio, and code checks caps, turnover and reasons before paper trading it against a control |
+| `finbg/pm/volatility.py` | Every day, a violent move in a watched stock triggers an LLM investigation of the cause (0 tokens on quiet days) |
+| `finbg/scan` | About 3,000 US stocks and every SEC filing are scored in code, Sonnet screens the top 30, Opus digs into up to 5, and ideas are tracked against a random control |
+| `finbg/th` | A separate Thai track: point-in-time stock list, prices and news for SET/mai, and its own scanner and idea portfolio |
+| `finlab` | The evaluation harness, plus slow factors on tradable Thai stocks net of SET tick costs |
 
-JSON ดิบของทุกรอบเก็บไว้ที่ `data/logs/label-runs/` (90 วัน)
+## Rules the code keeps
 
-### 🔐 ทำไมงานนี้ปลอดภัยพอจะรันตอนไม่มีคนดู
+1. Everything written to disk carries `fetched_at`, the knowledge date that prevents look-ahead bias.
+2. Raw data is never overwritten; a repeated file name gets a `__v2` suffix, because stored data is evidence.
+3. Every command is safe to run twice, because cron may do exactly that.
+4. The ledger is recomputed from scratch each time, so a missed day repairs itself.
+5. A step that depends on an outside service may fail without taking the others down; missing news never costs the prices.
+6. The model writes plans and the code holds the rules. Every limit lives in code, where a model cannot argue with it.
 
-พาดหัวข่าวคือข้อความจากคนอื่นที่ไม่ผ่านการตรวจ — เท่ากับป้อน prompt injection
-ให้โมเดลที่มีสิทธิ์รันคำสั่ง จึงล้อมสามชั้น:
-
-1. **`deny` ใน [`scripts/label-loop-settings.json`](scripts/label-loop-settings.json)** — ปิด `cd`/`python3`/`curl`/`git`/`rm`/`Edit`
-2. **hook [`scripts/guard-queue-write.py`](scripts/guard-queue-write.py)** — เขียนได้เฉพาะ `data/queue/` (กัน `../` ด้วย realpath)
-3. **`permission_denials` ใน audit log** — เห็นย้อนหลังว่ามีอะไรพยายามอะไร
-
-ทดสอบแล้วว่าโหมด headless **ปฏิเสธแล้วไปต่อ ไม่ค้างรอคนกด** จึงไม่แขวน cron
-
-> ⚠️ **อย่าเก็บ `deny` ไว้ใน `.claude/settings.local.json`**
-> ระบบเขียนทับไฟล์นั้นทุกครั้งที่คุณกดอนุมัติคำสั่ง และเคยทำ deny block หายทั้งก้อน
-> พร้อมพากฎอันตรายกลับเข้า allow ใหม่ — ใช้ `.claude/settings.json` แทน
-
-### สั่งเองในเซสชัน
-
-ถ้าอยากรันเดี๋ยวนั้นแทนที่จะรอ cron ใช้ [`scripts/loop-prompt.md`](scripts/loop-prompt.md) กับ `/loop`
-หรือเรียกสคริปต์ตรง ๆ: `./scripts/label-auto.sh`
-
----
-
-## 🪙 บันไดการใช้ token
-
-หลักการเดียวที่ใช้จัดลำดับ:
-
-> **ใช้ token กับสิ่งที่ย้อนหลังทำไม่ได้ก่อน แล้วค่อยลงมาที่สิ่งที่ทำทีหลังได้**
-
-| ระดับ | งาน | ย้อนหลังทำได้ไหม |
-|-------|-----|-----------------|
-| **L0** | เก็บข้อมูลดิบ (cron ทำเอง) | ❌ — 0 token |
-| **L1** | แผนรายสัปดาห์ของ PM (ออกเองเช้าวันเสาร์) | ❌ ปนเปื้อน hindsight ทันที |
-| **L2** | label ข่าว | ❌ ปนเปื้อน hindsight ทันที |
-| **L3** | ทดสอบสมมติฐาน | ⚠️ ได้ แต่ช้าลง |
-| **L4** | สรุป paper เป็นโน้ต | ✅ ได้ตลอด |
-
-L1/L2 **เน่าตามเวลา** — ทิ้งไว้นานยิ่งไร้ค่า เพราะเราเริ่มรู้ผลลัพธ์แล้ว
-L4 ไม่เน่า → เป็น **"ที่ทิ้ง token" ที่ปลอดภัย** เมื่อเหลือเยอะใกล้หมดรอบ
+## Commands
 
 ```bash
-uv run finbg queue      # เรียงให้แล้ว ⏳ = เน่าตามเวลา ทำก่อน
+uv run finbg daily              # the daily job cron runs: collect, ledger, brief
+uv run finbg status             # how much data the store holds
+uv run finbg plan status        # the current plan and its performance against the control
+uv run finbg plan run --dry-run # show the prompt the PM would read, without calling the model
+uv run finbg scan --dry-run     # whole-market scan without calling the model
+uv run finbg ideas              # idea portfolio against its random control
+uv run finbg th status          # what the Thai store holds
+uv run finlab gate              # check that the harness rejects fake factors
+uv run finlab eval momentum_12_1
 ```
 
----
+Run `uv run finbg --help` and `uv run finlab --help` for the rest.
 
-## รอบการทำงาน
+## Unattended labelling
 
-| ความถี่ | ทำอะไร | token |
-|---------|--------|-------|
-| ทุกวัน (อัตโนมัติ) | เก็บข้อมูล + label ข่าว (L2) + พอร์ต PM + ตัดสินคำทำนาย | น้อย (label ~$0.5 เทียบเท่า) |
-| ทุกวัน (อัตโนมัติ) | หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (~2–3 ครั้ง/เดือน) | ~$0.2/ครั้ง เทียบเท่า |
-| ทุกสัปดาห์ (อัตโนมัติ) | แผนรายสัปดาห์ของ PM (L1) — เสาร์เช้า | กลาง (1 session) |
-| ทุกสัปดาห์ (คุณ) | อ่านแผนใน `Journal/Plans/` แล้วดูว่ามีอะไรค้านได้ไหม | 0 |
-| ทุกเดือน | ทดสอบ hypothesis 1 ใบด้วย `finlab` (L3) | หลัก |
-| เมื่อ token เหลือ | สรุป paper (L4) | เท่าไหร่ก็ได้ |
+`scripts/morning.sh` runs once a day through anacron, at the machine's first start-up, and calls the other jobs in order. News headlines are third-party text fed to a model that can run commands, so `scripts/label-auto.sh` fences it three ways: a deny list in `scripts/label-loop-settings.json`, a hook (`scripts/guard-queue-write.py`) that allows writes only inside `data/queue/`, and an audit of `permission_denials` after every run. It also checks the model the CLI actually used from the harness's own record.
 
-### L1 — แผนรายสัปดาห์ (แทน "เติมบทวิเคราะห์ใน brief" เดิม)
+## Backups
 
-เดิม L1 คือให้คนสั่ง Claude เติมบทวิเคราะห์ใน brief ทุกวัน — ผ่านไป 45 ฉบับ ไม่ได้เติมเลยสักฉบับ
-ตอนนี้ PM เขียนแผนเองสัปดาห์ละครั้ง (มีมุมมอง เหตุผล หลักฐาน คำทำนายที่ตัดสินได้)
-และ brief รายวันเป็นข้อเท็จจริงล้วน + สรุปแผนที่ใช้อยู่ — รายละเอียดอยู่ในโน้ต 11 (เก็บเป็นส่วนตัว)
-
-### L2 — labeled corpus (สินทรัพย์ที่ซื้อไม่ได้)
-
-```bash
-uv run finbg label prepare        # 1. เตรียม batch — ฟรี
-#   เปิด Claude Code: "ทำตามคำสั่งใน data/queue/label-request-*.md"   ← 2. ใช้ token
-uv run finbg label ingest         # 3. ตรวจ + เก็บ — ฟรี
-```
-
-**ทำไมต้อง label ตอนนี้ไม่ใช่ทีหลัง:** ถ้า label ข่าวปี 2026 ในปี 2027
-โมเดลรู้ผลลัพธ์ไปแล้ว → `novelty` (ใหม่จริงหรือย้ำของเดิม) ปนเปื้อน hindsight
-ฟิลด์ `days_after_publish` บันทึกไว้ให้กรองทิ้งได้ทีหลังถ้า label ช้าเกินไป
-
-schema v1: `regime`, `novelty`, `topic` + `topic_free`, `horizon`,
-`materiality`, `entities[]` และ `rationale`
-แก้ schema ที่ [`finbg/labels.py`](finbg/labels.py) ที่เดียว — prompt และ validator สร้างจากตรงนั้น
-
----
-
-## ตารางงานที่ติดตั้งแล้ว
-
-ไฟล์จริงอยู่ที่ [`scripts/crontab.txt`](scripts/crontab.txt) (ติดตั้งด้วย `crontab scripts/crontab.txt`)
-และ [`scripts/anacrontab`](scripts/anacrontab)
-
-```cron
-5 5-23 * * *  anacron -s -t scripts/anacrontab ...   # เช็กทุกชั่วโมง 05:05–23:05 ว่างานวันนี้รันหรือยัง (รันจริงวันละครั้ง)
-@reboot       sleep 120; anacron ...                 # ตอนบูต (ถ้าหลัง 05:00)
-```
-
-| งานใน anacron | รอบ | ทำอะไร |
-|---|---|---|
-| `finbg-morning` | ทุกวัน | `scripts/morning.sh` (เก็บข้อมูล → label → ข้อมูล + scanner หุ้นไทย → สืบหุ้นผันผวน → สแกน US → สรุปรายสัปดาห์ + แผนถ้าถึงเวลา) |
-| `finbg-backup` | ทุก 7 วัน | `scripts/backup.sh` |
-
-ไม่เรียก anacron ช่วง 00:00–04:59 เพราะเป็นช่วงที่ตลาดสหรัฐยังเปิด (ข้อมูลวันนั้นยังไม่ครบ)
-และถ้ารันตอนตลาดเปิด ตัวเก็บราคาก็ตัดแท่งของวันนั้นทิ้งอยู่แล้ว (`finbg/market.py`)
-
-ตรวจสอบว่าทำงาน:
-
-```bash
-tail -5 data/logs/morning-$(date +%Y-%m).log    # daily=0 label=0 th=0 plan=0|skip
-tail -12 data/logs/th-$(date +%Y-%m).log        # แทร็กไทย: รายชื่อ/ราคา/ข่าว + feed ย้อนครบ 30 ชม. ไหม
-tail -20 data/logs/plan-$(date +%Y-%m).log
-```
-
----
-
-## โครงสร้าง
-
-```
-finbg/
-  config.py          ค่าตั้งทั้งหมดอยู่ที่เดียว (รวม mandate ของ PM และเกณฑ์แจ้งเตือน)
-  storage.py         ชั้นเก็บข้อมูล + บังคับ fetched_at ทุกไฟล์
-  market.py          เวลาตลาดสหรัฐ: แท่งที่ปิดแล้ว และแผนมีผลเมื่อไหร่
-  ledger.py          paper baseline 3 กลยุทธ์
-  headless.py        เรียก Claude แบบไม่มีเครื่องมือ ได้ JSON ตาม schema
-  notify.py          แจ้งเตือน (เดสก์ท็อป และ ntfy ถ้าเปิด)
-  journal.py         สร้าง prediction / hypothesis
-  cli.py             จุดเข้าใช้งาน
-  datasource.py      แหล่งราคาของฉบับสาธารณะ: ยังไม่มี ต้องต่อเอง (ดูหัวข้อฉบับสาธารณะ)
-  collect/
-    prices.py        ราคา (+ ดึงย้อนหลังให้ ticker ที่ประวัติสั้น) ผ่าน datasource.py
-    news.py          รวมข่าวจาก sources/ (rss, sec และ gdelt)
-    calendar.py      วันประกาศงบ + ประมาณการนักวิเคราะห์ (snapshot รายวัน)
-    fundamentals.py  งบ SEC XBRL แบบ point-in-time → TTM, margin, P/E, FCF
-  pm/                Portfolio Manager — ดูโน้ต 11
-    context.py       ทุกอย่างที่ PM ได้อ่าน (0 token)
-    schema.py        รูปแบบแผน + ตัวตรวจกติกา
-    runner.py        ถึงเวลาไหม → เรียก → ตรวจ → เก็บ → แจ้ง
-    portfolio.py     พอร์ตกระดาษ llm_pm vs pm_control
-    predictions.py   ตัดสินคำทำนายด้วยราคา + calibration
-    volatility.py    ทุกวัน: หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ + ตัดสินใจ
-    watch.py         ทุกสัปดาห์: สรุป 8-K/ข่าวแรง/VIX ก่อนออกแผน
-  scan/              สแกนทั้งตลาด — ดูโน้ต 12
-    universe.py      หุ้นทั้งตลาด (snapshot รายวัน) แหล่งรายชื่อต้องต่อเอง
-    panel.py         ประวัติราคาของ universe กว้าง (ฐานของ "ผิดปกติ")
-    filings.py       SEC: index รายวัน, หัวข้อ 8-K, Form 4, 13D และเนื้อข่าว 8-K
-    score.py         ชั้น 1: คะแนนความผิดปกติ × ตัวคูณ "คนมองข้าม"
-    triage.py        ชั้น 2: Sonnet คัดกรอง
-    deepdive.py      ชั้น 3: Opus ดำลึก
-    book.py          พอร์ตไอเดีย + กลุ่มควบคุม + ผลจริง
-    runner.py        รวมทุกชั้น
-  brief/
-    context.py       สร้าง context pack (JSON) — ไม่เรียก LLM
-    render.py        แปลงเป็น Markdown สำหรับ Obsidian
-
-finlab/              harness วิจัย (IC, walk-forward, purged CV, DSR, PBO, ประตู 1)
-
-data/
-  raw/prices/*.parquet     snapshot ราคา ห้ามแก้
-  raw/news/*.jsonl         ข่าวดิบ ห้ามแก้
-  raw/calendar/*.jsonl     ปฏิทินงบ + ประมาณการ (ย้อนหลังหาฟรีไม่ได้)
-  raw/fundamentals/        fact จาก SEC XBRL (วันที่ยื่น = knowledge date)
-  raw/_manifest.jsonl      audit trail ว่าดึงอะไรตอนไหน
-  labels/                  label ข่าว (สร้างย้อนหลังไม่ได้)
-  plans/                   แผนที่ผ่านการตรวจ + requests/ (พรอมต์จริง) + resolutions.jsonl
-  alerts/                  ประวัติการแจ้งเตือน
-  investigations/          ผลสืบเหตุการณ์ผันผวน + ข้อมูลที่ Claude ได้อ่าน
-  opportunities/           พอร์ตไอเดีย, กลุ่มควบคุม, ผลจริง และ requests/ (ข้อความที่โมเดลได้อ่าน)
-  raw/screener/, raw/sec_index/, raw/sec_events/, raw/insider/, raw/earnings_calendar/   ข้อมูลดิบทั้งตลาด
-  research/                ราคาของ universe วิจัย + experiments.jsonl (ดาวน์โหลดใหม่ได้)
-  derived/                 คำนวณใหม่ได้เสมอ ลบทิ้งได้ (รวม pm_ledger.parquet)
-  logs/                    log ของงานอัตโนมัติ
-
-Journal/                   โฟลเดอร์ที่ Obsidian อ่าน (ระบบสร้างตอนรัน ไม่อยู่ใน copy นี้)
-  Briefs/                  situation brief รายวัน
-  Plans/                   แผนรายสัปดาห์ของ PM
-  Alerts/                  การแจ้งเตือนรายวัน
-  Investigations/          ผลสืบเหตุการณ์ผันผวน
-  Opportunities/           ผลสแกนรายวัน + scoreboard
-  Research/                ผลจาก harness
-  Predictions/             คำทำนาย (BG-1)
-  Hypotheses/              สมมติฐานรอทดสอบ (BG-4)
-```
-
----
-
-## หลักการที่ยึดในโค้ด
-
-1. **ทุกไฟล์ที่เขียนต้องมี `fetched_at`** — คือ `knowledge_date` ที่ป้องกัน look-ahead bias
-2. **ไม่เขียนทับข้อมูลดิบ** — ไฟล์ชื่อซ้ำจะเติม `__v2` แทน เพราะข้อมูลที่เก็บแล้วคือหลักฐาน
-3. **ทุกคำสั่งรันซ้ำได้ปลอดภัย** — cron อาจรันซ้ำ ต้องไม่ทำให้ข้อมูลเพี้ยน
-4. **ledger คำนวณใหม่ทั้งหมดทุกครั้ง** — ถ้าเคยรันพลาดไปวันนึง ระบบซ่อมตัวเองได้
-5. **ขั้นตอนที่พึ่งบริการภายนอกต้องขาดได้** — ข่าวดึงไม่ได้ ต้องไม่ทำให้ราคาเสียไปด้วย
-
----
-
-## แหล่งข่าว: 3 แหล่ง ไม่ต้องใช้ API key
-
-> [!note] ฉบับสาธารณะไม่มี `yahoo` และ `gnews` (Google News RSS ค้นรายบริษัท) เพราะ robots.txt ของทั้งสองไม่อนุญาตให้บอตอ่าน
-> SEC ได้หัวข้อ 8-K (Item) ในพาดหัว และใช้เวลาที่ SEC รับเอกสารจริงแทนวันที่ยื่น
-
-ออกแบบให้ **แหล่งหนึ่งล้มไม่กระทบแหล่งอื่น** (แต่ละ source ห่อด้วย try/except แยกกัน)
-ตอนทดสอบ GDELT โดนแบนทั้งวัน แต่ยังเก็บข่าวได้ 126 รายการจาก 3 แหล่งที่เหลือ
-
-| แหล่ง | ชนิด | จุดแข็ง | จุดอ่อน |
-|-------|------|---------|---------|
-| `rss` | outlet + **primary** | เสถียรสุด แทบไม่มี rate limit | จำนวนจำกัด |
-| `sec` | **primary** | **8-K = เหตุการณ์สำคัญตามกฎหมาย** | ไม่ใช่ "ข่าว" |
-| `gdelt` | aggregator | กว้างสุด นานาชาติ | rate limit เข้มมาก |
-
-เปิด/ปิดแหล่งได้ที่ `NEWS_SOURCES` ใน `config.py` หรือชั่วคราว:
-
-```bash
-uv run finbg news --sources rss,sec    # ข้าม gdelt
-```
-
-### `source_type` สำคัญกว่าที่คิด
-
-- `primary` — เอกสารต้นทาง (SEC filing, ประกาศ Fed) = **ข้อเท็จจริงที่ต้องแจ้งตามกฎหมาย**
-- `outlet` — สื่อรายงานเอง = การตีความ
-- `aggregator` — รวบรวมต่อ
-
-ไม่ควรนับน้ำหนักเท่ากัน — brief จึงแสดง primary ก่อนเสมอ
-และตอนตัดข่าวซ้ำ **เก็บ record จากแหล่งที่น่าเชื่อถือกว่าไว้** (primary > outlet > aggregator)
-
-### ⚠️ `tickers` กับ `tickers_hint`
-
-บทเรียนจากข้อมูลจริง: Yahoo คืนข่าว "P&G Guided Below Estimates" มาในผลของ **NVDA**
-เพราะมันคือ "ข่าวที่แสดงบนหน้า NVDA" ไม่ใช่ "ข่าวเกี่ยวกับ NVDA"
-
-| ฟิลด์ | ความหมาย |
-|-------|----------|
-| `tickers` | **ยืนยันแล้ว** — ชื่อย่อหรือชื่อบริษัทปรากฏในพาดหัวจริง |
-| `tickers_hint` | แหล่งบอกมาแต่ยังไม่ยืนยัน — ใช้เป็นคำใบ้เท่านั้น |
-
-ถ้าปล่อยให้การผูกผิดเข้าคลัง งาน text alpha ที่สร้างบนคลังนี้จะเสียทั้งหมด
-ตอน label จึงย้ำในคำสั่งว่าห้ามเชื่อ `tickers_hint` โดยอัตโนมัติ
-
-### GDELT rate limit
-
-จากการทดสอบ: ยิงห่าง 6 วินาทียังโดน HTTP 429 และเมื่อโดนแล้วติดค้างนานหลายสิบนาที
-ระบบจึงเว้น **15 วินาที**, รวมคำค้นด้วย `OR` เหลือ **4 requests/วัน**,
-มี **circuit breaker** (คำแรกไม่ผ่าน หยุดทั้งรอบ) และ**เพดานเวลา 240 วินาที**
-
-ถ้าอยากได้ปริมาณมากกว่านี้ GDELT แนะนำ BigQuery แทน DOC API
-
----
-
-## ⚠️ การสำรองข้อมูล
-
-`scripts/backup.sh` รันอัตโนมัติทุก 7 วัน (anacron) สำรองของที่ **สร้างย้อนหลังไม่ได้**:
-
-| สำรอง | เพราะ |
-|-------|-------|
-| `data/raw/` | ราคาที่ปรับแล้วเปลี่ยนย้อนหลัง และ URL ข่าวเน่าตามเวลา |
-| `data/labels/` | label ที่ทำย้อนหลัง = ปนเปื้อน hindsight |
-| `data/plans/` | แผนรายสัปดาห์ + พรอมต์ที่ใช้จริง + ผลคำทำนาย = track record ของ PM |
-| `data/alerts/` | ประวัติการแจ้งเตือน (เหตุผลของทุก replan) |
-| `data/investigations/` | ผลสืบเหตุการณ์ผันผวน + ข้อมูลที่ Claude ได้อ่าน |
-| `data/opportunities/` | พอร์ตไอเดีย + กลุ่มควบคุม + ผลจริง |
-| `Journal/` | คำทำนาย บทวิเคราะห์ สมมติฐาน — งานสมองล้วน |
-
-ไม่สำรอง `data/derived/` เพราะคำนวณใหม่ได้จาก raw เสมอ
-
-> [!warning]
-> ปลายทางเริ่มต้นคือ `~/backups/finbg` ซึ่ง **อยู่บนดิสก์เดียวกัน**
-> — กันลบพลาดได้ แต่**กันดิสก์พังไม่ได้**
->
-> ควรเปลี่ยนเป็นที่อื่น:
-> ```bash
-> export FINBG_BACKUP_DIR=/mnt/external/finbg     # external drive
-> ```
-> หรือแก้ค่าเริ่มต้นใน `scripts/backup.sh`
-
-สคริปต์ **ไม่ใช้ `--delete`** โดยตั้งใจ — ถ้าไฟล์ต้นทางหายเพราะอุบัติเหตุ
-สำเนาสำรองต้องยังอยู่
-
----
-
-Built with help from AI coding assistants.
+`scripts/backup.sh` runs every 7 days and copies only what cannot be rebuilt: raw data, labels, plans with their prompts, alerts, investigations, idea results and the journal. It never uses `--delete`. The default target is on the same disk, which guards against mistakes but not against a disk failure, so point `FINBG_BACKUP_DIR` somewhere else.
