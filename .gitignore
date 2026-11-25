@@ -9,21 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
-# ข้อมูลที่ระบบสร้าง/ดึงมา — ไม่เหมาะกับ git เพราะเป็น binary ที่โตทุกวัน
+# Data the system creates or fetches: binary files that grow every day, not suited to git
 #
-# ⚠️ สำคัญ: data/raw/ คือ **คลัง point-in-time ที่สร้างย้อนหลังไม่ได้**
-# ถ้าหายคือหายถาวร — ต้องมีระบบสำรองแยกต่างหาก (ดู README หัวข้อ "การสำรองข้อมูล")
+# ⚠️ Important: data/raw/ is a **point-in-time store that cannot be rebuilt later**;
+# lose it and it is gone for good, so it needs a separate backup (see scripts/backup.sh)
 data/
 
-
-# ไฟล์ชั่วคราวของ XeLaTeX — สร้างใหม่ทุกครั้งที่คอมไพล์ docs/guide.tex
-docs/*.aux
-docs/*.log
-docs/*.toc
-docs/*.out
-docs/*.xdv
-docs/*.fls
-docs/*.fdb_latexmk
-
-# ฉบับสาธารณะ: brief แผน และผลสแกนที่ระบบสร้างตอนรัน เก็บไว้ในเครื่อง
+# Public edition: the briefs, plans and scan results the system writes at run time stay local
 Journal/
