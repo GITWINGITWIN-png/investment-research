@@ -1,15 +1,15 @@
-"""แจ้งเตือน — เดสก์ท็อปเป็นค่าเริ่มต้น มือถือ (ntfy) เปิดเองโดยตั้งใจเท่านั้น
+"""Notifications: desktop by default; phone (ntfy) only when turned on deliberately.
 
-## ทำไมไม่เปิด ntfy ให้อัตโนมัติ
+## Why ntfy is not turned on automatically
 
-ntfy.sh เป็นเซิร์ฟเวอร์สาธารณะ: ใครรู้ชื่อ topic ก็อ่านข้อความได้ และข้อความถูกเก็บไว้
-ชั่วคราวบนเซิร์ฟเวอร์ — การส่งรายละเอียดพอร์ตออกไปจึงควรเป็นการตัดสินใจของผู้ใช้
-`finbg notify setup` สร้าง topic สุ่มที่เดายาก แล้วบอกวิธีกดติดตามในแอป
+ntfy.sh is a public server: anyone who knows the topic name can read the messages, and they are stored
+temporarily on the server, so sending portfolio details out should be the user's decision.
+`finbg notify setup` creates a random, hard-to-guess topic and explains how to subscribe in the app.
 
-## ทำไมต้องตั้ง DBUS เอง
+## Why DBUS is set by hand
 
-cron/anacron รันโดยไม่มีตัวแปรของเซสชันเดสก์ท็อป notify-send จึงหาหน้าจอไม่เจอ
-ถ้ารู้ที่อยู่ของ session bus (/run/user/<uid>/bus) ก็ส่งถึงหน้าจอได้ตามปกติ
+cron and anacron run without the desktop session's variables, so notify-send cannot find the screen;
+with the session bus address (/run/user/<uid>/bus) it reaches the screen as usual.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def _ntfy(topic: str, title: str, body: str, severity: str, server: str) -> bool
             f"{server.rstrip('/')}/{topic}",
             data=body.encode("utf-8"),
             headers={
-                # header ต้องเป็น latin-1 — ntfy รองรับ RFC 2047 สำหรับหัวเรื่องภาษาอื่น
+                # Headers must be latin-1; ntfy supports RFC 2047 for titles in other scripts
                 "Title": f"=?UTF-8?B?{__import__('base64').b64encode(title.encode()).decode()}?=",
                 "Priority": PRIORITY.get(severity, "default"),
                 "Tags": "chart_with_upwards_trend" if severity in ("info", "medium") else "warning",
@@ -72,7 +72,7 @@ def _ntfy(topic: str, title: str, body: str, severity: str, server: str) -> bool
 
 
 def send(title: str, body: str, severity: str = "info") -> dict[str, Any]:
-    """ส่งทุกช่องทางที่เปิดไว้ และบันทึกลง log เสมอ (ไม่มีช่องทางไหนทำงานก็ยังย้อนดูได้)"""
+    """Send through every enabled channel and always write to the log (so it can be reviewed even if no channel works)"""
     settings = _settings()
     delivered: dict[str, bool] = {"desktop": _desktop(title, body, severity)}
     topic = settings.get("ntfy_topic")
@@ -87,7 +87,7 @@ def send(title: str, body: str, severity: str = "info") -> dict[str, Any]:
 
 
 def setup() -> dict[str, Any]:
-    """เปิดการแจ้งเตือนผ่านมือถือด้วย ntfy — สร้าง topic สุ่มที่เดายาก"""
+    """Turn on phone notifications through ntfy, with a random, hard-to-guess topic"""
     current = _settings()
     if current.get("ntfy_topic"):
         return {"ok": True, "created": False, "topic": current["ntfy_topic"], "server": current.get("ntfy_server", config.NTFY_SERVER)}

@@ -1,10 +1,10 @@
-"""ชั้น 3 — Opus ดำลึกตัวที่ผ่านการคัดกรอง แล้วตัดสินว่าจะเข้าพอร์ตไอเดียไหม
+"""Stage 3: Opus digs into the stocks that passed screening and decides whether they enter the idea portfolio.
 
-ได้ข้อมูลเต็ม: เนื้อข่าวประชาสัมพันธ์ใน 8-K (สูงสุด ~6,000 ตัวอักษร), งบการเงินจาก XBRL,
-รายการซื้อของคนใน, ราคา 20 วันเทียบ benchmark, ข่าวล่าสุดพร้อม ID ให้อ้าง
+It gets the full data: the press release text in the 8-K (up to about 6,000 characters), XBRL financials,
+insider purchases, 20 days of prices against the benchmark, and recent news with IDs to cite.
 
-ไอเดียที่ "add_to_book" = ซื้อที่ราคาปิดของวันทำการแรกที่ปิดหลังเวลาตัดสินใจ ถือ 20 วันทำการ
-เทียบ IWM (มูลค่า < $10B) หรือ SPY — กติกาตายตัว ไม่มีการเลือกจังหวะออกทีหลัง
+An "add_to_book" idea = buy at the close of the first trading day that closes after the decision time, hold 20 trading days,
+against IWM (market cap < $10B) or SPY; fixed rules, no choosing the exit later.
 """
 
 from __future__ import annotations

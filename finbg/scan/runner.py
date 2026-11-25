@@ -1,6 +1,6 @@
-"""สแกนทั้งตลาด 1 รอบ ต่อ 1 วันทำการที่ปิดแล้ว — morning.sh เรียกทุกวัน
+"""Scan the whole market once per closed trading day; morning.sh calls this daily.
 
-ข้ามเองถ้า: ตลาดสหรัฐยังเปิดอยู่ (ข้อมูลยังไม่ครบ) · วันนั้นสแกนไปแล้ว · ข้อมูลซ้ำกับวันก่อน (วันหยุด)
+Skipped automatically when the US market is still open (data incomplete), that day was already scanned, or the data repeats the previous day (a holiday).
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ def _deep_prompt(picks: list[str], by_ticker: dict[str, dict[str, Any]], news: d
             try:
                 facts = fundamentals_module.facts_for(ticker, f"{cik:010d}")
                 f = fundamentals_module.summary(closes={ticker: c["close"]}, facts=facts).get(ticker)
-            except Exception:                                   # noqa: BLE001 — งบไม่มีไม่ควรทำให้ทั้งรอบพัง
+            except Exception:                                   # noqa: BLE001 (missing financials should not break the whole round)
                 f = None
             if f:
                 def pct(x: Any) -> str:
@@ -155,15 +155,15 @@ def run(*, dry_run: bool = False, no_llm: bool = False, force: bool = False) -> 
     if label in state["scanned"] and not force:
         return {"ok": True, "skipped": f"สแกนวันทำการ {label} ไปแล้ว"}
 
-    # ── ชั้น 0: เก็บทั้งตลาด ────────────────────────────────────────────
-    # screener = รายชื่อหุ้น + มูลค่าตลาด + หมวด (เก็บแบบ PIT) · ราคาจริงมาจาก yfinance เพราะ screener ค้างได้
+    # ── Stage 0: collect the whole market ────────────────────────────────────────────
+    # screener = stock list + market cap + sector (stored point-in-time); real prices come from yfinance because the screener can be stale
     snap, _ = universe.snapshot(label)
     wanted = sorted(universe.tradable(snap)["ticker"])
     update = panel.update_recent(wanted)
     if update.get("latest") != label and not force:
         return {"ok": True, "skipped": f"ยังไม่มีราคาของวันทำการ {label} (ล่าสุด {update.get('latest')}) — "
                                         "วันหยุดตลาดหรือข้อมูลยังไม่เข้า รอบหน้าลองใหม่"}
-    # ราคาไม่ครบ = ตัดสินใจจากข้อมูลค้างบางตัว (เคยเกิดแล้ว) → ไม่สแกน รอบหน้าลองใหม่
+    # Incomplete prices mean deciding on some stale data (it has happened), so no scan; try again next round
     if (update.get("coverage") or 0) < 0.95 and not force:
         return {"ok": True, "skipped": f"ได้ราคาของวันทำการ {label} แค่ {update.get('coverage', 0):.0%} ของ universe "
                                         f"(ไม่ได้ {update.get('failed')} ตัว — น่าจะโดนจำกัดความถี่) รอบหน้าลองใหม่"}
@@ -188,10 +188,10 @@ def run(*, dry_run: bool = False, no_llm: bool = False, force: bool = False) -> 
                 if r["n_estimates"] is not None}
     reported = [r for r in calendar["reported"] if r["report_date"] >= (session - timedelta(days=3)).isoformat()]
 
-    # ── ชั้น 1: ให้คะแนน ────────────────────────────────────────────────
+    # ── Stage 1: score ────────────────────────────────────────────────
     scored = score.score(tradable, base, events, insider, reported, coverage, cik_map)
     candidates = scored.head(config.SCAN_CANDIDATES).to_dict(orient="records") if not scored.empty else []
-    # ตัวที่ไม่มีราคาของวันนั้นจริง ห้ามเข้ารอบ (ไม่ให้โมเดลวิเคราะห์จากแถวที่ค้าง)
+    # Stocks without a real price for that day may not become finalists (so the model never analyses stale rows)
     fresh_today = set(panel.load().query("date == @pd.Timestamp(@label)")["ticker"])
     if not scored.empty:
         scored = scored[scored["ticker"].isin(fresh_today)].reset_index(drop=True)
@@ -215,7 +215,7 @@ def run(*, dry_run: bool = False, no_llm: bool = False, force: bool = False) -> 
     costs = 0.0
 
     if candidates and not no_llm:
-        # ── ชั้น 2: Sonnet คัดกรอง ──────────────────────────────────────
+        # ── Stage 2: Sonnet screens ──────────────────────────────────────
         # Public edition: per-company news came from Google News RSS search, which
         # news.google.com disallows for automated clients, so the cards carry no news.
         news: dict[str, list[dict[str, Any]]] = {}
@@ -235,7 +235,7 @@ def run(*, dry_run: bool = False, no_llm: bool = False, force: bool = False) -> 
             picks = []
             summary["triage_error"] = screened.get("error")
 
-        # ── ชั้น 3: Opus ดำลึก ──────────────────────────────────────────
+        # ── Stage 3: Opus deep dive ──────────────────────────────────────────
         if picks:
             by_ticker = {c["ticker"]: c for c in candidates}
             prompt, refs = _deep_prompt(picks, by_ticker, news, ticker_cik, session)

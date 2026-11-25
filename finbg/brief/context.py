@@ -1,13 +1,13 @@
-"""สร้าง "context pack" — สรุปสถานการณ์อดีต→ปัจจุบันแบบคำนวณล้วน
+"""Build the "context pack": a purely computed summary of the situation from past to present.
 
-**ไฟล์นี้ไม่เรียก LLM เลย** และนั่นคือเจตนา
+**This file never calls an LLM**, on purpose.
 
-แนวคิด: แยกงานเป็นสองชั้น
-  ชั้นที่ 1 (ไฟล์นี้)  — รวบรวมข้อเท็จจริง  → โค้ดล้วน ฟรี ทำซ้ำได้เป๊ะ
-  ชั้นที่ 2 (Claude)   — ตีความ + เชื่อมโยง → ใช้ token เฉพาะตรงที่มนุษย์/LLM เก่งกว่าโค้ด
+The work is split into two layers:
+  Layer 1 (this file): gather the facts with plain code; free and exactly repeatable
+  Layer 2 (the LLM): interpret and connect; spend tokens only where a model beats code
 
-ถ้าให้ LLM ไปนั่งคำนวณ % เปลี่ยนแปลงเอง = เผา token กับงานที่ pandas ทำได้ฟรี
-และยังเสี่ยงคำนวณผิดด้วย
+Letting an LLM compute percentage changes itself burns tokens on work pandas does for free,
+and risks getting the arithmetic wrong.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from .. import config, ledger, storage
 from ..collect import calendar as calendar_module
 from ..collect import fundamentals as fundamentals_module
 
-# ช่วงเวลาที่ดูย้อนหลัง (วันทำการโดยประมาณ)
+# Look-back windows (approximate trading days)
 HORIZONS: dict[str, int] = {
     "1d": 1,
     "1w": 5,
@@ -33,7 +33,7 @@ HORIZONS: dict[str, int] = {
 
 
 def _pct_change_over(series: pd.Series, periods: int) -> float | None:
-    """% เปลี่ยนแปลงย้อนหลัง N วันทำการ — คืน None ถ้าข้อมูลไม่พอ"""
+    """Percent change over the last N trading days; None if there is not enough data"""
     clean = series.dropna()
     if len(clean) <= periods:
         return None
@@ -41,7 +41,7 @@ def _pct_change_over(series: pd.Series, periods: int) -> float | None:
 
 
 def _ticker_snapshot(series: pd.Series) -> dict[str, Any]:
-    """สรุปสถานะของ 1 ticker: ราคาล่าสุด, ผลตอบแทนหลายช่วง, ตำแหน่งเทียบ 52 สัปดาห์"""
+    """Snapshot of one ticker: last price, returns over several windows, position in the 52-week range"""
     clean = series.dropna()
     if clean.empty:
         return {}
@@ -55,7 +55,7 @@ def _ticker_snapshot(series: pd.Series) -> dict[str, Any]:
         },
     }
 
-    # ตำแหน่งเทียบช่วง 52 สัปดาห์ บอก "ของแพงหรือถูก" ได้เร็วกว่าดูราคาเปล่า ๆ
+    # Position within the 52-week range shows "cheap or expensive" faster than the raw price
     year = clean.tail(252)
     if len(year) > 20:
         high, low = float(year.max()), float(year.min())
@@ -63,11 +63,11 @@ def _ticker_snapshot(series: pd.Series) -> dict[str, Any]:
             "high": round(high, 2),
             "low": round(low, 2),
             "pct_from_high": round((last / high - 1.0) * 100, 2),
-            # 0 = ต่ำสุดของปี, 100 = สูงสุดของปี
+            # 0 = low of the year, 100 = high of the year
             "position_pct": round((last - low) / (high - low) * 100, 1) if high > low else None,
         }
 
-    # อยู่เหนือหรือใต้เส้นค่าเฉลี่ย 200 วัน — ตัวชี้ trend ที่ง่ายและใช้กันมากที่สุด
+    # Above or below the 200-day moving average: the simplest and most widely used trend signal
     if len(clean) >= 200:
         ma200 = float(clean.tail(200).mean())
         snapshot["vs_ma200_pct"] = round((last / ma200 - 1.0) * 100, 2)
@@ -77,13 +77,13 @@ def _ticker_snapshot(series: pd.Series) -> dict[str, Any]:
 
 
 def _quant_signals(clean: pd.Series) -> dict[str, Any]:
-    """สัญญาณเชิงปริมาณพื้นฐาน — คำนวณด้วยโค้ด ไม่ใช้ token
+    """Basic quantitative signals, computed in code without tokens.
 
-    - `mom_12_1_pct`: ผลตอบแทน 12 เดือน ข้ามเดือนล่าสุด (นิยามเดียวกับ ledger.mom_12_1)
-    - `vol_60d_pct`: ความผันผวนรายปีจากผลตอบแทนรายวัน 60 วัน
+    - `mom_12_1_pct`: 12-month return skipping the latest month (same definition as ledger.mom_12_1)
+    - `vol_60d_pct`: annualised volatility from 60 days of daily returns
 
-    ⚠️ ยังไม่ผ่านการพิสูจน์ใน harness (finlab) ว่ามีพลังทำนายบน universe นี้
-    ให้ถือเป็นข้อมูลประกอบ ไม่ใช่สัญญาณที่เชื่อได้ — แผนรายสัปดาห์ถูกบอกเรื่องนี้ไว้ตรง ๆ
+    ⚠️ Not yet shown in the harness (finlab) to have predictive power on this universe.
+    Treat them as context, not as reliable signals; the weekly plan is told this explicitly.
     """
     out: dict[str, Any] = {}
     if len(clean) > 252:
@@ -95,10 +95,10 @@ def _quant_signals(clean: pd.Series) -> dict[str, Any]:
 
 
 def _breadth(prices: pd.DataFrame, tickers: list[str]) -> dict[str, Any]:
-    """ความกว้างของตลาด: กี่ % ของหุ้นอยู่เหนือ MA200
+    """Market breadth: the percentage of stocks above their 200-day moving average.
 
-    ตัวเลขนี้บอกสิ่งที่ดัชนีไม่บอก — ดัชนีอาจขึ้นเพราะหุ้นใหญ่ไม่กี่ตัว
-    ขณะที่หุ้นส่วนใหญ่กำลังลง (breadth แย่) ซึ่งมักเป็นสัญญาณเตือน
+    It shows what an index hides: the index can rise on a few large stocks
+    while most stocks fall (poor breadth), which is often a warning sign.
     """
     above = 0
     counted = 0
@@ -122,9 +122,9 @@ def _breadth(prices: pd.DataFrame, tickers: list[str]) -> dict[str, Any]:
 
 
 def _vix_regime(prices: pd.DataFrame) -> dict[str, Any]:
-    """ระดับ VIX พร้อม percentile ย้อนหลัง 1 ปี
+    """VIX level with its percentile over the past year.
 
-    ค่า VIX เปล่า ๆ ตีความยาก (20 ถือว่าสูงไหม?) แต่ percentile ตอบได้ทันที
+    A raw VIX value is hard to read (is 20 high?); the percentile answers at once.
     """
     if "^VIX" not in prices.columns:
         return {}
@@ -149,9 +149,9 @@ def _vix_regime(prices: pd.DataFrame) -> dict[str, Any]:
 
 
 def _news_digest(days: int = 3) -> dict[str, Any]:
-    """สรุปข่าวที่เก็บได้ล่าสุด — นับตามคำค้นและแหล่ง พร้อมพาดหัวตัวอย่าง
+    """Summary of the latest collected news: counts by query and source, with sample headlines.
 
-    ไม่พยายามตีความ ณ ตรงนี้ — แค่จัดระเบียบให้ชั้นที่ 2 อ่านง่าย
+    No interpretation here; it only organises the news so layer 2 can read it easily.
     """
     files = sorted(config.RAW_NEWS.glob("*.jsonl"))[-days:]
     if not files:
@@ -174,13 +174,13 @@ def _news_digest(days: int = 3) -> dict[str, Any]:
     by_type = df["source_type"].value_counts().to_dict() if "source_type" in df else {}
     by_publisher = df["publisher"].value_counts().head(10).to_dict() if "publisher" in df else {}
 
-    # จัดพาดหัวโดยแยก primary ออกมาก่อน — เอกสารต้นทาง (SEC filing, ประกาศ Fed)
-    # เป็นข้อเท็จจริงตามกฎหมาย ไม่ใช่การตีความ จึงควรอ่านก่อนข่าวทั่วไป
+    # Headlines put primary sources first: original documents (SEC filings, Fed releases)
+    # are legal facts, not interpretation, so they should be read before general news
     headlines: list[dict[str, str]] = []
     if "source_type" in df and "title" in df:
-        # ภายในแต่ละชนิด ให้รายการที่ผูกกับ watchlist ขึ้นก่อน แล้วค่อยเรียงตามวันที่
-        # เหตุผล: Fed ปล่อยประกาศเยอะ (รวมเรื่องธนาคารเล็ก ๆ ที่ไม่เกี่ยวกับเรา)
-        # ถ้าเรียงตามวันที่อย่างเดียว SEC filing ของหุ้นที่เราถือจะถูกเบียดตกไป
+        # Within each type, items tied to the watchlist come first, then by date
+        # Reason: the Fed publishes a lot (including notices about small banks that do not concern us)
+        # Sorting by date alone would push SEC filings for stocks we hold out of view
         df = df.assign(_relevant=df["tickers"].map(lambda t: 1 if t else 0))
         for source_type in ("primary", "outlet", "aggregator"):
             group = df[df["source_type"] == source_type].sort_values(
@@ -197,7 +197,7 @@ def _news_digest(days: int = 3) -> dict[str, Any]:
                     "url": str(row.get("url", "")),
                 })
 
-    # นับเฉพาะ ticker ที่ยืนยันแล้ว — ไม่นับ tickers_hint ที่ยังไม่ยืนยัน
+    # Count confirmed tickers only; unconfirmed tickers_hint values are not counted
     ticker_counts: dict[str, int] = {}
     for record in records:
         for ticker in record.get("tickers") or []:
@@ -216,7 +216,7 @@ def _news_digest(days: int = 3) -> dict[str, Any]:
 
 
 def _ledger_block() -> dict[str, Any]:
-    """สถานะ baseline ที่รันคู่ขนาน — เส้นเปรียบเทียบสำหรับทุกความคิดเห็น"""
+    """Status of the baselines that run in parallel: the comparison line for every opinion"""
     nav = ledger.load()
     if nav.empty:
         return {"available": False}
@@ -236,7 +236,7 @@ def _ledger_block() -> dict[str, Any]:
 
 
 def _journal_block() -> dict[str, Any]:
-    """คำทำนายและสมมติฐานที่ยังค้างอยู่ — เพื่อให้ brief เตือนเราเรื่องที่เคยคิดไว้"""
+    """Open predictions and hypotheses, so the brief reminds us of what we thought earlier"""
     def scan(folder, status_field: str) -> list[dict[str, str]]:
         items: list[dict[str, str]] = []
         for path in sorted(folder.glob("*.md")):
@@ -275,7 +275,7 @@ def _journal_block() -> dict[str, Any]:
 
 
 def _pm_block() -> dict[str, Any]:
-    """สถานะ Portfolio Manager: แผนที่ใช้อยู่ ผลงานเทียบ control แจ้งเตือนล่าสุด คำทำนาย"""
+    """Portfolio Manager status: the active plan, performance against the control, latest alerts, predictions"""
     from datetime import timedelta
 
     from ..pm import plans as plans_module
@@ -309,13 +309,13 @@ def _pm_block() -> dict[str, Any]:
 
 
 def _opportunities_block() -> dict[str, Any]:
-    """ผลสแกนทั้งตลาดครั้งล่าสุด + ตารางผลจริงของพอร์ตไอเดียเทียบกลุ่มควบคุม"""
+    """Latest whole-market scan, plus the realised results of the idea portfolio against its control group"""
     from ..scan import book as scan_book
 
     ideas = [json.loads(l) for l in scan_book.IDEAS.read_text(encoding="utf-8").splitlines() if l.strip()] \
         if scan_book.IDEAS.exists() else []
     voided = scan_book.voided_runs()
-    ideas = [i for i in ideas if i["created_at"] not in voided]       # รอบที่ประกาศยกเลิกไม่แสดง
+    ideas = [i for i in ideas if i["created_at"] not in voided]       # Cancelled release rounds are not shown
     latest_run = max((i["created_at"] for i in ideas), default=None)
     latest = [i for i in ideas if i["created_at"] == latest_run]
     return {
@@ -327,7 +327,7 @@ def _opportunities_block() -> dict[str, Any]:
 
 
 def _fundamentals_block() -> dict[str, Any]:
-    """ตัวเลขงบล่าสุดต่อบริษัท (SEC XBRL) — ราคาที่ใช้คิด P/E คือราคาปิดล่าสุด"""
+    """Latest financials per company (SEC XBRL); P/E uses the latest close"""
     closes = storage.price_matrix("close")
     if closes.empty:
         return {}
@@ -336,10 +336,10 @@ def _fundamentals_block() -> dict[str, Any]:
 
 
 def build() -> dict[str, Any]:
-    """ประกอบ context pack ทั้งหมด แล้วบันทึกเป็น JSON
+    """Assemble the whole context pack and save it as JSON.
 
-    ผลลัพธ์ไฟล์นี้คือ *อินพุตเดียว* ที่ชั้นตีความต้องใช้ —
-    ทำให้ควบคุมได้ว่า token จะถูกใช้กับข้อมูลเท่าไหร่
+    This file is the *only* input the interpretation layer needs,
+    which keeps control over how many tokens go to data.
     """
     storage.ensure_dirs()
     prices = storage.price_matrix("adj_close")
@@ -388,7 +388,7 @@ def build() -> dict[str, Any]:
 
 
 def latest() -> dict[str, Any] | None:
-    """อ่าน context pack ล่าสุดที่สร้างไว้"""
+    """Load the most recent context pack"""
     files = sorted((config.DERIVED / "context").glob("*.json"))
     if not files:
         return None

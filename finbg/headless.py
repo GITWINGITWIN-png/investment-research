@@ -1,24 +1,24 @@
-"""เรียก Claude แบบ headless ที่ "ไม่มีเครื่องมือเลย" แล้วรับผลเป็น JSON ตาม schema
+"""Call Claude headless with "no tools at all" and get a JSON answer that follows a schema.
 
-## ทำไมต่างจาก label-auto.sh
+## How this differs from label-auto.sh
 
-label-auto ให้โมเดลมีเครื่องมือ (Write + `uv run finbg label ...`) แล้วล้อมด้วย deny list
-และ hook — จำเป็นเพราะงานนั้นวนหลายรอบในเซสชันเดียว
+label-auto gives the model tools (Write + `uv run finbg label ...`) fenced by a deny list
+and a hook, which that job needs because it loops many times in one session.
 
-งานวางแผนไม่ต้องแตะไฟล์อะไรเลย: โค้ดเตรียมข้อมูลทั้งหมดใส่พรอมต์ โมเดลตอบเป็น JSON
-แล้วโค้ดตรวจเอง จึงปิดเครื่องมือทั้งหมด (`--tools ""`) และบังคับรูปแบบคำตอบด้วย
-`--json-schema` → **พาดหัวข่าวที่แฝงคำสั่ง (prompt injection) ไม่มีอะไรให้สั่ง**
-ผลร้ายที่สุดที่ทำได้คือทำให้แผนบนกระดาษแย่ลง ภายในกรอบที่โค้ดบังคับอยู่แล้ว
+Planning does not touch any file: code puts all the data into the prompt, the model answers in JSON,
+and code checks the answer, so every tool is disabled (`--tools ""`) and the answer format is enforced with
+`--json-schema`. **A headline carrying a prompt injection has nothing to command.**
+The worst it can do is make the paper plan worse, inside limits the code already enforces.
 
-## ทำไมล้าง environment ก่อนเรียก
+## Why the environment is cleared before the call
 
-ถ้าเรียกจากในเซสชัน Claude Code (เช่น ตอนเราทดสอบ) จะมีตัวแปร CLAUDECODE ติดมา
-ซึ่งทำให้ CLI ปฏิเสธการเปิดเซสชันซ้อน — การส่ง environment แบบเดียวกับ cron
-(มีแค่ HOME/PATH/LANG) ทำให้ผลเหมือนกันไม่ว่าจะเรียกจากไหน
+When called from inside a Claude Code session (for example while testing), a CLAUDECODE variable comes along
+and makes the CLI refuse to open a nested session. Passing the same environment as cron
+(only HOME/PATH/LANG) gives the same result wherever it is called from.
 
-## หลักฐานเรื่องโมเดล
+## Evidence of the model
 
-ใช้ `modelUsage` ที่ harness คืนมา (โมเดลปลอมค่านี้ไม่ได้) — บทเรียนเดียวกับ label-auto
+Uses the `modelUsage` the harness returns (the model cannot fake it), the same lesson as label-auto.
 """
 
 from __future__ import annotations
@@ -60,9 +60,9 @@ def run_structured(
     timeout_sec: int,
     max_budget_usd: float,
 ) -> dict[str, Any]:
-    """รันเซสชันเดียว คืน dict ที่มี `ok`, `output` (JSON ที่ได้), หลักฐานเรื่องโมเดล และต้นทุน
+    """Run one session; return a dict with `ok`, `output` (the JSON received), evidence of the model, and the cost.
 
-    เก็บผลดิบทุกครั้งที่ data/logs/<job>-runs/ (ตรวจย้อนหลังได้ว่าโมเดลตอบอะไรจริง)
+    The raw result is always saved in data/logs/<job>-runs/ (so what the model really answered can be checked later).
     """
     binary = _claude_binary()
     if binary is None:
@@ -73,7 +73,7 @@ def run_structured(
     stamp = storage.utc_now().strftime("%Y-%m-%dT%H%M%S")
     audit_path = audit_dir / f"{stamp}.json"
 
-    # ไดเรกทอรีว่างโดยเฉพาะ: ไม่ให้ตั้งค่า/หน่วยความจำของโปรเจกต์หลุดเข้าไปในบริบทของ PM
+    # A deliberately empty directory: keeps the project's settings and memory out of the PM's context
     workdir = config.DATA / "headless"
     workdir.mkdir(parents=True, exist_ok=True)
 

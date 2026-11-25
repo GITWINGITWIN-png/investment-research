@@ -1,26 +1,26 @@
-"""ชั้น 1 ของ scanner ไทย — โค้ดให้คะแนนเหตุการณ์ของหุ้นที่ซื้อขายได้จริง (0 token)
+"""Stage 1 of the Thai scanner: code scores events for really tradable stocks (0 tokens).
 
-## ต้องมี "ข้อมูล" อย่างน้อยหนึ่งอย่าง
+## There must be at least one piece of information
 
-สมมติฐานของแทร็กไทยคือ "Claude อ่านข้อมูลภาษาไทยแล้วเห็นสิ่งที่ราคายังไม่สะท้อน" — หุ้นที่ราคาขยับ
-โดยไม่มีข่าวหรือรายงานผู้บริหารเลย ไม่มีอะไรให้อ่าน จึงไม่เข้ารอบ (ราคา/volume เป็นแค่ตัวเสริมคะแนน)
+The Thai track's hypothesis is that "Claude reads Thai-language information and sees what prices do not yet reflect"; a stock whose price moves
+with no news or insider report at all gives nothing to read, so it is not a finalist (price and volume only add to the score).
 
-| ส่วน | คะแนน | เหตุผล |
+| Part | Score | Reason |
 |---|---|---|
-| ข่าวใหม่ในหน้าต่าง | 1 ต่อชิ้น (สูงสุด 3) + 0.5 ต่อสำนักที่เพิ่ม (สูงสุด 1.5) | หลายสำนักพูดเรื่องเดียว = เรื่องจริง ไม่ใช่ข่าวฝากลงที่เดียว |
-| ผู้บริหารซื้อในตลาด (ตาราง 59, 10 วัน) | ≥ 2 คน หรือรวม ≥ ฿1M = 3 · คนเดียว ≥ ฿200k = 1.5 | ซื้อด้วยเงินตัวเอง มีความหมายกว่าขาย |
-| ราคาขยับผิดปกติ | ถ้า abs(z) ≥ 2.5 ได้ abs(z)/2 (สูงสุด 3) | ราคาบอกว่ามีอะไรเกิดขึ้น |
-| volume พุ่ง | ถ้า ≥ 2.5 เท่าของมัธยฐาน 20 วัน ได้ log2 (สูงสุด 3) | |
+| New news in the window | 1 per item (max 3) + 0.5 per extra outlet (max 1.5) | several outlets on one story = a real story, not a placed article |
+| Insider buying in the market (Form 59, 10 days) | >= 2 insiders or >= ฿1M in total = 3; one insider >= ฿200k = 1.5 | buying with one's own money means more than selling |
+| Unusual price move | if abs(z) >= 2.5, abs(z)/2 (max 3) | the price says something happened |
+| Volume spike | if >= 2.5 times the 20-day median, log2 (max 3) | |
 
-ตัวคูณ "คนมองข้าม": มูลค่า < ฿5bn ×1.3 · < ฿20bn ×1.15 · ≥ ฿200bn ×0.5
-· สื่อพูดถึงใน 5 วันก่อนหน้า 0 ชิ้น ×1.2 · ≥ 10 ชิ้น ×0.8
+"Overlooked" multiplier: market cap < ฿5bn x1.3, < ฿20bn x1.15, >= ฿200bn x0.5,
+no media mentions in the previous 5 days x1.2, >= 10 mentions x0.8.
 
-**น้ำหนักทั้งหมดตั้งจากเหตุผล ยังไม่ได้จูนจากผล** (เหมือน scanner US) — จูนจากผลทีหลังต้องนับเป็นการทดลองใหม่
+**Every weight is set by reasoning, not yet tuned on outcomes** (as in the US scanner); tuning on outcomes later must count as a new experiment.
 
-## หน้าต่างเวลาของข่าว
+## News time window
 
-ข่าวที่เผยแพร่หลังราคาปิดของวันทำการก่อนหน้า (17:00) ถึงเวลาตัดสินใจ — ส่วนหนึ่งสะท้อนในราคาปิดล่าสุดแล้ว
-ส่วนหลังปิดตลาดยังไม่สะท้อน ทั้งสองส่วนอยู่ในการ์ดพร้อมเวลา ให้ Sonnet/Opus แยกเองได้
+News published after the previous trading day's close (17:00) up to the decision time; part of it is already in the latest close
+and the after-hours part is not. Both are on the card with timestamps, so Sonnet and Opus can tell them apart.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from . import insider, prices, universe
 
 
 def _news() -> list[dict[str, Any]]:
-    """ทุกข่าวในคลัง ข่าวเดียวกันจากหลายไฟล์ (ดึงซ้อนกัน) เก็บครั้งแรกที่เห็น"""
+    """Every news item in the store; for the same story in several files (overlapping fetches), the first seen is kept"""
     seen: dict[str, dict[str, Any]] = {}
     for path in sorted(config.RAW_TH_NEWS.glob("*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -90,7 +90,7 @@ def candidates(session: pd.Timestamp, decided_at: datetime) -> tuple[list[dict[s
         news_items = sorted(fresh.get(ticker, []), key=lambda i: i["published_at"], reverse=True)
         bought = buys.get(ticker, [])
         if not news_items and not bought:
-            continue                                     # ไม่มีอะไรให้อ่าน → ไม่ใช่สมมติฐานของแทร็กนี้
+            continue                                     # Nothing to read, so it is outside this track's hypothesis
         parts: dict[str, float] = {}
         reasons: list[str] = []
         if news_items:

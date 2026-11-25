@@ -1,12 +1,12 @@
-"""Paper ledger — กลยุทธ์ baseline ที่เดินคู่ขนานไปตลอด (BG-2)
+"""Paper ledger: baseline strategies that run in parallel all the time (BG-2).
 
-จุดประสงค์: อีก 18 เดือนข้างหน้า เวลาคุณบอกว่า "กลยุทธ์ผมดี"
-คุณจะมี **เส้นเปรียบเทียบที่เดินมาพร้อมกันจริง ๆ** ไม่ใช่ backtest ที่เถียงได้
+Purpose: 18 months from now, when you say "my strategy is good",
+you will have **a comparison line that really ran alongside it**, not a backtest anyone can dispute.
 
-ประเด็นความซื่อสัตย์ที่สำคัญที่สุดในไฟล์นี้:
-เราคำนวณย้อนหลังได้ 10 ปีก็จริง แต่ **ช่วงก่อนวันที่เริ่มเก็บจริงคือ backtest**
-ส่วนหลังจากนั้นคือ **live** — สองอย่างนี้มีน้ำหนักต่างกันมาก จึงต้องแยกให้ชัด
-(`live_start` ในผลลัพธ์) ไม่งั้นเราจะหลอกตัวเองว่ามี track record ยาวกว่าความจริง
+The most important honesty point in this file:
+we can compute 10 years back, but **everything before the day collection really started is a backtest**,
+and only what comes after is **live**. The two deserve very different weight, so they are kept apart
+(`live_start` in the result); otherwise we would fool ourselves into a longer track record than we have.
 """
 
 from __future__ import annotations
@@ -17,21 +17,21 @@ from . import config, storage
 
 
 def _monthly_rebalance_dates(index: pd.DatetimeIndex) -> list[pd.Timestamp]:
-    """วันทำการแรกของแต่ละเดือน — ใช้เป็นจังหวะปรับพอร์ต
+    """First trading day of each month, used as the rebalancing schedule.
 
-    เลือกรายเดือนเพราะ turnover ต่ำ (ค่าธรรมเนียมไม่กิน) และเป็นมาตรฐาน
-    ที่งานวิจัย momentum ส่วนใหญ่ใช้ → เทียบกับวรรณกรรมได้
+    Monthly because turnover is low (fees do not eat the return) and it is the standard
+    in most momentum research, so results compare with the literature.
     """
     frame = pd.DataFrame(index=index)
     return list(frame.groupby([index.year, index.month]).apply(lambda g: g.index[0]))
 
 
 def trading_calendar(prices: pd.DataFrame) -> pd.DatetimeIndex:
-    """ปฏิทินวันทำการของตลาดหุ้น อ้างอิงจากวันที่ SPY มีราคา
+    """Stock-market trading calendar, taken from the days on which SPY has a price.
 
-    จำเป็นเพราะตารางราคารวม BTC-USD ซึ่งเทรด 7 วัน/สัปดาห์
-    ถ้าไม่กรอง เสาร์-อาทิตย์จะถูกนับเป็นวันทำการด้วย ทำให้จำนวนวันและ
-    drawdown ของกลยุทธ์หุ้นเพี้ยน
+    Needed because the price table includes BTC-USD, which trades 7 days a week;
+    without this filter weekends would count as trading days, distorting day counts and
+    the drawdowns of the stock strategies.
     """
     if "SPY" not in prices.columns:
         return prices.index
@@ -43,15 +43,15 @@ def _nav_from_weights(
     weights: pd.DataFrame,
     start_capital: float,
 ) -> pd.Series:
-    """คำนวณ NAV จากน้ำหนักพอร์ตที่กำหนดในแต่ละวัน
+    """Compute NAV from the portfolio weights set for each day.
 
-    ใช้ผลตอบแทนรายวัน × น้ำหนัก **ของเมื่อวาน** เสมอ
-    เหตุผล: น้ำหนักวันนี้ถูกตัดสินใจจากข้อมูลถึงเมื่อวาน — ถ้าใช้น้ำหนักวันนี้
-    คูณผลตอบแทนวันนี้ จะกลายเป็น look-ahead bias ทันที
+    Always uses daily returns times **yesterday's** weights.
+    Reason: today's weights were decided with data up to yesterday; multiplying today's weights
+    by today's returns would be look-ahead bias straight away.
 
-    ข้อสมมติที่ต้องรู้: การคงน้ำหนักคงที่ทุกวันเท่ากับปรับสมดุลรายวัน
-    ซึ่งในความจริงมีค่าธรรมเนียม เรายังไม่คิดตรงนี้ — ยอมรับได้เพราะนี่เป็น
-    "เส้นเปรียบเทียบ" ไม่ใช่กลยุทธ์ที่เราจะอ้างว่ามี alpha
+    An assumption to know: holding the weights constant every day equals daily rebalancing,
+    which costs fees in reality. They are not counted here, which is acceptable because this is
+    a "comparison line", not a strategy we claim has alpha.
     """
     returns = prices.pct_change().fillna(0.0)
     aligned = weights.reindex(returns.index).ffill().fillna(0.0)
@@ -60,7 +60,7 @@ def _nav_from_weights(
 
 
 def _buy_hold(prices: pd.DataFrame, ticker: str) -> pd.Series:
-    """ถือตัวเดียวยาว ๆ — เส้นที่กลยุทธ์ทุกอันต้องเอาชนะให้ได้ก่อน"""
+    """Buy and hold a single asset: the line every strategy must beat first"""
     if ticker not in prices.columns:
         return pd.Series(dtype=float)
     subset = prices[[ticker]].dropna()
@@ -69,7 +69,7 @@ def _buy_hold(prices: pd.DataFrame, ticker: str) -> pd.Series:
 
 
 def _sixty_forty(prices: pd.DataFrame) -> pd.Series:
-    """60% หุ้น / 40% พันธบัตร ปรับสมดุลรายเดือน — benchmark ที่มี risk control"""
+    """60% stocks / 40% bonds, rebalanced monthly: a benchmark with risk control"""
     needed = ["SPY", "AGG"]
     if not all(t in prices.columns for t in needed):
         return pd.Series(dtype=float)
@@ -77,7 +77,7 @@ def _sixty_forty(prices: pd.DataFrame) -> pd.Series:
     subset = prices.loc[trading_calendar(prices), needed].dropna()
     weights = pd.DataFrame(index=subset.index, columns=needed, dtype=float)
 
-    # ตั้งน้ำหนักใหม่ทุกต้นเดือน แล้วปล่อยให้ลอยตามราคาระหว่างเดือน (ffill)
+    # Reset weights at the start of each month, then let them drift with prices during the month (ffill)
     for date in _monthly_rebalance_dates(subset.index):
         weights.loc[date] = [0.6, 0.4]
 
@@ -85,21 +85,21 @@ def _sixty_forty(prices: pd.DataFrame) -> pd.Series:
 
 
 def _momentum_12_1(prices: pd.DataFrame) -> pd.Series:
-    """12-1 momentum บน sector ETF — factor คลาสสิกที่รู้จักกันดีที่สุด
+    """12-1 momentum on sector ETFs: the best-known classic factor.
 
-    "12-1" = ดูผลตอบแทน 12 เดือนย้อนหลัง แต่ **ข้ามเดือนล่าสุด**
-    เหตุผลที่ข้าม: ระยะสั้น 1 เดือนมักมี short-term reversal ซึ่งกลบสัญญาณ momentum
+    "12-1" = the 12-month return, **skipping the latest month**.
+    Why skip it: the 1-month horizon often shows short-term reversal, which masks the momentum signal.
     """
     pool = [t for t in config.MOMENTUM_POOL if t in prices.columns]
     if len(pool) < config.MOMENTUM_TOP_N:
         return pd.Series(dtype=float)
 
-    # จำกัดเฉพาะวันทำการของตลาดหุ้น ไม่ให้เสาร์-อาทิตย์จาก BTC ปนเข้ามา
+    # Keep only stock-market trading days, so BTC's weekends do not get in
     subset = prices.loc[trading_calendar(prices), pool].dropna(how="all")
     weights = pd.DataFrame(0.0, index=subset.index, columns=pool)
 
     for date in _monthly_rebalance_dates(subset.index):
-        window_end = date - pd.DateOffset(months=1)     # ข้ามเดือนล่าสุด
+        window_end = date - pd.DateOffset(months=1)     # Skip the latest month
         window_start = date - pd.DateOffset(months=12)
 
         history = subset.loc[:window_end]
@@ -117,22 +117,22 @@ def _momentum_12_1(prices: pd.DataFrame) -> pd.Series:
         weights.loc[date, :] = 0.0
         weights.loc[date, winners] = 1.0 / config.MOMENTUM_TOP_N
 
-    # ก่อนถึง rebalance ครั้งแรกยังไม่มีน้ำหนัก → ถือเงินสด (NAV คงที่)
+    # Before the first rebalance there are no weights yet, so hold cash (flat NAV)
     weights = weights.where(weights.ne(0).any(axis=1), other=pd.NA).ffill().fillna(0.0)
     return _nav_from_weights(subset, weights, config.LEDGER_START_CAPITAL)
 
 
 def _live_start() -> pd.Timestamp | None:
-    """วันแรกที่เราเริ่มเก็บข้อมูลเอง = เส้นแบ่ง backtest กับ live"""
+    """The first day we collected data ourselves: the line between backtest and live"""
     files = sorted(config.RAW_PRICES.glob("*.parquet"))
     if not files:
         return None
-    # ชื่อไฟล์คือวันที่รัน เช่น 2026-08-03.parquet
+    # The file name is the run date, e.g. 2026-08-03.parquet
     return pd.Timestamp(files[0].stem.split("__")[0])
 
 
 def _summarise(nav: pd.Series, live_start: pd.Timestamp | None) -> dict[str, object]:
-    """สรุปตัวเลขที่จำเป็น โดยแยก live ออกจาก backtest อย่างชัดเจน"""
+    """Summarise the key numbers, keeping live clearly separate from backtest"""
     if nav.empty:
         return {"ok": False}
 
@@ -154,11 +154,11 @@ def _summarise(nav: pd.Series, live_start: pd.Timestamp | None) -> dict[str, obj
 
 
 def rebuild() -> dict[str, object]:
-    """คำนวณ ledger ใหม่ทั้งหมดจากคลังราคาที่เก็บไว้
+    """Recompute the whole ledger from the stored prices.
 
-    ตั้งใจให้ **คำนวณใหม่ทุกครั้ง** แทนที่จะเขียนต่อท้าย เพราะ:
-    - ทำซ้ำได้ผลเดิมเสมอ (deterministic)
-    - ถ้าเคยรันพลาดไปวันนึง ระบบซ่อมตัวเองได้ ไม่มีรูโหว่ถาวร
+    **Recomputed every time** on purpose instead of appended, because:
+    - it always gives the same result (deterministic)
+    - if a day's run was missed, the system repairs itself; no permanent gaps
     """
     storage.ensure_dirs()
     prices = storage.price_matrix("adj_close")
@@ -191,7 +191,7 @@ def rebuild() -> dict[str, object]:
 
 
 def load() -> pd.DataFrame:
-    """อ่าน ledger ที่คำนวณไว้แล้ว (ใช้ตอนสร้าง brief)"""
+    """Load the computed ledger (used when building the brief)"""
     path = config.DERIVED / "ledger.parquet"
     if not path.exists():
         return pd.DataFrame()

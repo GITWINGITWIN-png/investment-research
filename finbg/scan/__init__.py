@@ -1,18 +1,19 @@
-"""สแกนทั้งตลาดสหรัฐหาโอกาสเล็ก ๆ ที่คนมองข้าม (ดูโน้ต 12)
+"""Scan the whole US market for small opportunities others overlook (see note 12).
 
-กรวย 4 ชั้น — กว้างที่สุดในส่วนที่ใช้โค้ด ลึกที่สุดในส่วนที่ใช้ Claude:
+A 4-stage funnel, widest where code does the work and deepest where Claude does:
 
-    ชั้น 0  universe.py · panel.py · filings.py · earnings.py
-            เก็บทั้งตลาด: หุ้น ~3,100 ตัว · filing ของ SEC ~3,400 ฉบับ/วัน · ปฏิทินงบทั้งตลาด   (0 token)
-    ชั้น 1  score.py     ให้คะแนนความผิดปกติ → เหลือ 30 ตัว                                 (0 token)
-    ชั้น 2  triage.py    Sonnet อ่านการ์ดของ 30 ตัว → เลือก ≤ 5 ตัวที่ควรดำลึก
-    ชั้น 3  deepdive.py  Opus ดำลึก → ไอเดียที่ตัดสินได้ด้วยราคา
-    วัดผล   book.py      พอร์ตไอเดีย + กลุ่มควบคุมที่สุ่มจาก 30 ตัวเดียวกัน
-    รวม     runner.py
+    stage 0  universe.py, panel.py, filings.py
+             collect the whole market: about 3,100 stocks, about 3,400 SEC filings a day   (0 tokens)
+             (earnings.py, the earnings calendar, is not in the public edition)
+    stage 1  score.py     score unusual activity -> 30 stocks remain                     (0 tokens)
+    stage 2  triage.py    Sonnet reads the cards of the 30 -> picks <= 5 for a deep dive
+    stage 3  deepdive.py  Opus digs deep -> ideas that prices can settle
+    results  book.py      idea portfolio + a control group drawn at random from the same 30
+    all      runner.py
 
-## ทำไมต้องมีกลุ่มควบคุม
+## Why a control group
 
-LLM เล่าเรื่องให้ noise ได้เก่งมาก ทุกไอเดียจะฟังดูมีเหตุผล — คำถามที่ต้องตอบจึงไม่ใช่
-"ไอเดียได้กำไรไหม" แต่คือ **"Claude ที่ดำลึก เลือกได้ดีกว่าสุ่มจากกองเดียวกันไหม"**
-ถ้าไม่ดีกว่า แปลว่ากำไร (ถ้ามี) มาจากตัวกรองชั้น 1 หรือจากตลาด ไม่ใช่จากการวิเคราะห์
+LLMs are very good at telling stories about noise; every idea will sound reasonable. So the question is not
+"did the ideas make money" but **"does Claude's deep dive pick better than a random draw from the same pile"**.
+If it does not, any profit came from the stage 1 filter or from the market, not from the analysis.
 """

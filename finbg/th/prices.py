@@ -1,14 +1,14 @@
-"""ราคารายวันของหุ้นไทย — snapshot ทุกวันแบบ point-in-time (แบบเดียวกับฝั่ง US ใน collect/prices.py)
+"""Daily prices of Thai stocks: a point-in-time snapshot every day (the same as the US side in collect/prices.py).
 
-## เก็บเฉพาะแท่งที่ปิดแล้ว
+## Only closed bars are stored
 
-SET ปิดราว 16:40 หลัง closing auction — ถ้ารันก่อน 17:00 เวลาไทย แท่งของวันนี้คือราคาระหว่างวัน
-ต้องตัดทิ้ง ไม่งั้นงานที่อ่านคลังนี้จะใช้ "ราคาปิด" ที่ยังไม่ใช่ราคาปิดโดยไม่รู้ตัว
+SET closes around 16:40 after the closing auction; before 17:00 Thai time, today's bar is an intraday price
+and must be dropped, or anything reading the store would unknowingly use a "close" that is not final.
 
-## ดึงให้ทุกตัวที่ "เคยจดทะเบียน" ไม่ใช่แค่รายชื่อวันนี้
+## Fetch every stock that was ever listed, not only today's list
 
-หุ้นที่เพิ่งถูกพักการซื้อขายหรือเพิกถอนยังควรมีราคาช่วงสุดท้ายในคลัง — นี่คือข้อมูลที่แหล่งฟรี
-ทำหายไปและทำให้ผลย้อนหลังสวยเกินจริง ถ้า Yahoo ไม่คืนราคาแล้วก็แค่บันทึกว่าดึงไม่ได้
+Stocks just suspended or delisted should still have their final prices in the store; this is exactly the data free sources
+lose, which makes backtests look better than reality. If Yahoo no longer returns a price, the failure is simply recorded.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from ..collect.prices import _tidy
 
 
 def drop_incomplete(df: pd.DataFrame, now: datetime | None = None) -> tuple[pd.DataFrame, int]:
-    """ตัดแท่งของวันนี้ถ้า SET ยังไม่ปิด (ก่อน 17:00 เวลาไทย) — คืน (ตาราง, จำนวนแถวที่ตัด)"""
+    """Drop today's bar if SET has not closed yet (before 17:00 Thai time); returns (table, number of rows dropped)"""
     local = (now or storage.utc_now()).astimezone(config.LOCAL_TZ)
     today = pd.Timestamp(local.date())
     if local.hour >= config.TH_BAR_FINAL_HOUR:
@@ -35,7 +35,7 @@ def drop_incomplete(df: pd.DataFrame, now: datetime | None = None) -> tuple[pd.D
 
 
 def download(symbols: list[str], period: str) -> tuple[pd.DataFrame, list[str]]:
-    """ดึงทีละก้อน (TH_CHUNK ตัว) เว้นจังหวะระหว่างก้อน — คืน (ตารางยาว, ตัวที่ดึงไม่ได้)"""
+    """Fetch in chunks (TH_CHUNK tickers) with pauses between chunks; returns (long table, tickers that failed)"""
     from ..datasource import yf
     frames, failed = [], []
     for start in range(0, len(symbols), config.TH_CHUNK):
@@ -51,7 +51,7 @@ def download(symbols: list[str], period: str) -> tuple[pd.DataFrame, list[str]]:
 
 
 def snapshot(symbols: list[str]) -> dict[str, Any]:
-    """แท่งย้อน ~1 เดือนของทุกตัว → 1 ไฟล์ต่อการรัน (snapshot ซ้อนกันได้ ตัวอ่านเก็บค่าที่ดึงทีหลังสุด)"""
+    """About one month of bars for every stock -> one file per run (snapshots may overlap; the reader keeps the latest fetched value)"""
     df, failed = download(symbols, config.TH_PRICE_PERIOD)
     if df.empty:
         return {"ok": False, "reason": "ไม่ได้ราคาเลย", "failed": len(failed)}
@@ -65,7 +65,7 @@ def snapshot(symbols: list[str]) -> dict[str, Any]:
 
 
 def read_all() -> pd.DataFrame:
-    """รวม snapshot ทั้งหมด — วันซ้ำเก็บแถวที่ดึงทีหลังสุด (ราคาปิดอาจถูกปรับหลังตลาดปิด)"""
+    """Merge every snapshot; for repeated dates keep the most recently fetched row (closes can be corrected after the market closes)"""
     files = sorted(config.RAW_TH_PRICES.glob("*.parquet"))
     if not files:
         return pd.DataFrame()

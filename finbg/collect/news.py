@@ -1,27 +1,27 @@
-"""ตัวประสานงานเก็บข่าวจากหลายแหล่ง
+"""Coordinates news collection from several sources.
 
-## หลักการ
+## Principle
 
-**แหล่งหนึ่งล้ม ต้องไม่ทำให้แหล่งอื่นเสียไปด้วย**
+**One failing source must not take the others down with it.**
 
-แต่ละ source ถูกเรียกแยกกันและห่อด้วย try/except — ผลลัพธ์คือ
-ต่อให้ GDELT โดนแบนทั้งสัปดาห์ เราก็ยังได้ข่าวจาก Yahoo/RSS/SEC ตามปกติ
+Each source is called separately and wrapped in try/except, so
+even if GDELT bans us for a week, news from RSS and SEC still arrives as usual.
 
-## ลำดับการเรียก
+## Call order
 
-เรียงจาก **เร็วและเชื่อถือได้มากที่สุด** ไปหาช้าที่สุด เพื่อให้ได้ข้อมูล
-ติดมือก่อนเสมอ แม้ตัวท้าย ๆ จะล้มเหลว:
+From **fastest and most reliable** to slowest, so that some data is always
+in hand even when the last sources fail:
 
-    yahoo (เร็ว ผูก ticker) → rss (เร็ว) → sec (ปานกลาง) → gdelt (ช้า เสี่ยงโดนแบน)
+    rss (fast) -> sec (medium) -> gdelt (slow, may get rate-limited)
 
-## การตัดข่าวซ้ำ
+## Deduplication
 
-หลายแหล่งมักรายงานเรื่องเดียวกัน ถ้าไม่ตัดซ้ำจะเปลือง token ตอน label
-ตัดด้วย URL ก่อน แล้วตามด้วยพาดหัวที่ normalize แล้ว (แหล่งต่างกันมัก
-ให้ URL คนละแบบสำหรับบทความเดียวกัน เช่น มี tracking parameter ต่อท้าย)
+Several sources often report the same story; without deduplication the labelling step wastes tokens.
+Duplicates are removed by URL first, then by normalised headline (different sources often
+give different URLs for the same article, for example with tracking parameters appended).
 
-เวลาเจอซ้ำ **เก็บอันที่ source_type ดีกว่าไว้** (primary > outlet > aggregator)
-เพราะเอกสารต้นทางเชื่อถือได้กว่าการรายงานต่อ
+When duplicates are found, **the copy with the better source_type is kept** (primary > outlet > aggregator),
+because an original document is more reliable than a report about it.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from typing import Any, Callable
 from .. import config, storage
 from .sources import gdelt, rss, sec
 
-# ลำดับความน่าเชื่อถือ ใช้ตัดสินว่าเก็บอันไหนเมื่อเจอข่าวซ้ำ
+# Reliability order, used to decide which copy to keep when a story is duplicated
 TYPE_RANK = {"primary": 3, "outlet": 2, "aggregator": 1}
 
 SOURCES: dict[str, Callable[[], list[dict[str, Any]]]] = {
@@ -40,21 +40,21 @@ SOURCES: dict[str, Callable[[], list[dict[str, Any]]]] = {
     "sec": sec.fetch,
     "gdelt": gdelt.fetch,
 }
-# ฉบับสาธารณะไม่มีแหล่ง yahoo และ gnews: robots.txt ของ query1/query2.finance.yahoo.com
-# และ news.google.com ไม่อนุญาตให้บอตอ่าน (ตรวจ 2026-11-25) ดู README หัวข้อแหล่งข้อมูล
+# The public edition has no yahoo or gnews source: robots.txt of query1/query2.finance.yahoo.com
+# and news.google.com does not allow bots (checked 2026-11-25); see the data sources section of the README
 
 
 def _title_key(title: str) -> str:
-    """ทำพาดหัวให้เทียบกันได้ — ตัดวรรคตอนและตัวพิมพ์ใหญ่-เล็กออก
+    """Normalise a headline for comparison: strip punctuation and letter case.
 
-    ใช้จับข่าวเดียวกันที่มาจากคนละแหล่งแล้ว URL ไม่ตรงกัน
+    Used to catch the same story from different sources whose URLs do not match.
     """
     cleaned = re.sub(r"[^\w\s]", "", title.lower())
     return " ".join(cleaned.split())[:90]
 
 
 def _dedupe(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """ตัดซ้ำโดยเก็บ record ที่มาจากแหล่งน่าเชื่อถือกว่าไว้"""
+    """Deduplicate, keeping the record from the more reliable source"""
     best: dict[str, dict[str, Any]] = {}
 
     for record in records:
@@ -63,10 +63,10 @@ def _dedupe(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not url or not title:
             continue
 
-        # ใช้พาดหัวเป็น key หลัก เพราะ URL ของข่าวเดียวกันต่างกันได้ตามแหล่ง
-        # ยกเว้นเอกสารต้นทาง: URL ของ SEC filing ไม่ซ้ำกันเสมอ แต่พาดหัวซ้ำกันได้
-        # (8-K สองฉบับของบริษัทเดียวกันในสัปดาห์เดียว พาดหัวเหมือนกันเป๊ะ)
-        # ถ้าใช้พาดหัวเป็น key ฉบับหนึ่งจะหายไปเงียบ ๆ — บั๊กนี้มีอยู่จริงก่อน 2026-10-24
+        # The headline is the main key, because the same story can have different URLs on different sources
+        # Except primary documents: SEC filing URLs are always unique, but their headlines can repeat
+        # (two 8-Ks from the same company in the same week can have identical headlines)
+        # With the headline as the key, one of them would silently disappear; this bug existed before 2026-10-24
         key = url if record.get("source_type") == "primary" else (_title_key(title) or url)
         current = best.get(key)
 
@@ -74,12 +74,12 @@ def _dedupe(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             best[key] = record
             continue
 
-        # รวม ticker จากทั้งสอง record ไม่ว่าจะเก็บอันไหนไว้ — ข้อมูลจะได้ไม่หาย
-        # แต่แยก confirmed กับ hint ต่อไป ไม่ปนกัน
+        # Merge the tickers from both records whichever one is kept, so no data is lost
+        # but keep confirmed tickers and hints separate
         merged = sorted(set(record["tickers"]) | set(current["tickers"]))
         merged_hint = sorted(
             (set(record.get("tickers_hint", [])) | set(current.get("tickers_hint", [])))
-            - set(merged)                       # ถ้ายืนยันได้แล้ว ไม่ต้องอยู่ใน hint อีก
+            - set(merged)                       # Once confirmed, a ticker no longer needs to be a hint
         )
 
         winner = (
@@ -93,9 +93,9 @@ def _dedupe(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def collect(sources: list[str] | None = None) -> dict[str, object]:
-    """เก็บข่าวจากทุกแหล่งที่เปิดใช้ แล้วบันทึกเป็นไฟล์เดียว
+    """Collect news from every enabled source and save it as one file.
 
-    ถือว่า **สำเร็จ** ถ้าได้ข่าวจากอย่างน้อย 1 แหล่ง
+    Counts as **success** if at least one source returned news.
     """
     storage.ensure_dirs()
     enabled = sources or config.NEWS_SOURCES
@@ -113,7 +113,7 @@ def collect(sources: list[str] | None = None) -> dict[str, object]:
         print(f"  ▸ {name}")
         try:
             found = fetcher()
-        except Exception as exc:                       # noqa: BLE001 — กันแหล่งหนึ่งล้มลามทั้งระบบ
+        except Exception as exc:                       # noqa: BLE001 (stops one failing source from bringing down the whole system)
             print(f"  ⚠️  {name} ล้มเหลว: {type(exc).__name__}: {exc}")
             failed.append(name)
             continue

@@ -1,12 +1,12 @@
-"""ประกอบ "ทุกอย่างที่ PM ได้อ่าน" — โค้ดล้วน 0 token
+"""Assemble "everything the PM gets to read": plain code, 0 tokens.
 
-ข้อความที่ได้ถูกเก็บถาวรที่ data/plans/requests/ คู่กับแผน → ย้อนดูได้เสมอว่า
-แผนแต่ละฉบับตัดสินใจจากข้อมูลอะไร (หลักฐานว่าไม่มี look-ahead)
+The resulting text is stored permanently in data/plans/requests/ next to the plan, so it is always possible to see
+what data each plan decided on (evidence of no look-ahead).
 
-## ข่าวมี ID (N1, N2, ...)
+## News has IDs (N1, N2, ...)
 
-PM อ้างหลักฐานด้วย ID แทนการคัดลอก URL ยาว ๆ — ประหยัด token และตรวจได้ว่าอ้างข่าวที่มีอยู่จริง
-ตอนเก็บแผน โค้ดแปลง ID กลับเป็นลิงก์ให้ (ดู plans.render)
+The PM cites evidence by ID instead of copying long URLs, which saves tokens and makes it checkable that the cited story exists.
+When the plan is stored, code turns the IDs back into links (see plans.render).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ SYSTEM_PROMPT = """คุณคือผู้จัดการพอร์ต 
 8. เขียนเนื้อหาเป็นภาษาไทย (ชื่อหุ้นและศัพท์เทคนิคใช้อังกฤษได้) กระชับ ตรงประเด็น"""
 
 
-# --- ช่วยจัดรูปแบบ ------------------------------------------------------------
+# --- Formatting helpers ------------------------------------------------------------
 
 def _pct(value: Any) -> str:
     return "—" if value is None else f"{value:+.1f}%"
@@ -78,10 +78,10 @@ MARKET_HEADER = [
 ]
 
 
-# --- ข่าว --------------------------------------------------------------------
+# --- News --------------------------------------------------------------------
 
 def _raw_news_index(since: datetime) -> dict[str, dict[str, Any]]:
-    """url → record ข่าวดิบที่ออกตั้งแต่ `since` (เก็บตัวแรกที่เจอ = เวลาที่เรารู้ครั้งแรก)"""
+    """url -> raw news record published since `since` (the first one found = when we first knew)"""
     index: dict[str, dict[str, Any]] = {}
     cutoff = since.isoformat()
     for path in sorted(config.RAW_NEWS.glob("*.jsonl")):
@@ -119,7 +119,7 @@ def _entities(label: dict[str, Any]) -> str:
 
 
 def _news_sections(now: datetime, held: set[str]) -> tuple[list[str], dict[str, dict[str, Any]]]:
-    """ข่าวที่ label แล้ว 7 วัน (เรียงตามความสำคัญ) + ข่าวล่าสุดที่ยังไม่ได้ label"""
+    """News labelled in the last 7 days (by importance) plus the latest unlabelled news"""
     raw = _raw_news_index(now - timedelta(days=7))
     labeled = _labels_by_url()
     refs: dict[str, dict[str, Any]] = {}
@@ -132,8 +132,8 @@ def _news_sections(now: datetime, held: set[str]) -> tuple[list[str], dict[str, 
             continue
         severity = (record.get("extra") or {}).get("severity", "info")
         touches_held = bool(set(record.get("tickers") or []) & held)
-        # ข่าวขยะ (class action spam, "ถ้าลงทุน $1,000 เมื่อ...") กินพื้นที่โดยไม่ให้ข้อมูล
-        # เก็บไว้เฉพาะเอกสารต้นทางหรือเรื่องที่กระทบตัวที่ถืออยู่
+        # Junk news (class-action spam, "if you had invested $1,000 in...") takes space without adding information
+        # Keep only original documents or stories that affect current holdings
         if (label.get("materiality") or 0) < 8 and record.get("source_type") != "primary" and not touches_held:
             continue
         score = (label.get("materiality") or 0) + (25 if severity in ("high", "critical") else 0) + (10 if touches_held else 0)
@@ -167,8 +167,8 @@ def _news_sections(now: datetime, held: set[str]) -> tuple[list[str], dict[str, 
         if url not in labeled and r.get("published_at", "") >= (now - timedelta(hours=48)).isoformat()
         and labels_module.is_high_signal(r)
     ]
-    # ใหม่สุดก่อน แล้วจัดตามความน่าเชื่อถือของแหล่ง (sort แบบ stable → ลำดับเวลาคงอยู่ในแต่ละชนิด)
-    # จำกัด 3 ชิ้นต่อหุ้น ไม่ให้บริษัทที่เป็นข่าวมากที่สุดกินพื้นที่ทั้งหมด
+    # Newest first, then by source reliability (a stable sort keeps time order within each type)
+    # At most 3 items per stock, so the most newsworthy company cannot take all the space
     rank = {"primary": 0, "outlet": 1, "aggregator": 2}
     recent.sort(key=lambda r: r.get("published_at", ""), reverse=True)
     recent.sort(key=lambda r: rank.get(r.get("source_type"), 9))
@@ -202,7 +202,7 @@ def _news_sections(now: datetime, held: set[str]) -> tuple[list[str], dict[str, 
     return lines, refs
 
 
-# --- ส่วนอื่น ------------------------------------------------------------------
+# --- Other sections ------------------------------------------------------------------
 
 def _alerts_since(since_iso: str | None) -> list[dict[str, Any]]:
     out = []
@@ -238,7 +238,7 @@ def _scorecard_lines() -> list[str]:
 
 def build_request(kind: str, plan_id: str, now: datetime | None = None,
                   trigger: list[str] | None = None) -> dict[str, Any]:
-    """คืน dict: system, user, meta (references, closes, today, previous) — ยังไม่เรียกโมเดล"""
+    """Return a dict: system, user, meta (references, closes, today, previous); the model is not called yet"""
     now = now or storage.utc_now()
     pack = brief_context.build()
     if not pack.get("ok"):
@@ -256,7 +256,7 @@ def build_request(kind: str, plan_id: str, now: datetime | None = None,
     et = market.to_et(now)
     local = now.astimezone(config.LOCAL_TZ)
     next_session = market.next_session_date(now)
-    # วันที่ของ pack อาจเป็นเสาร์/อาทิตย์เพราะ BTC เทรดทุกวัน — ใช้วันทำการจริงของตลาดหุ้น
+    # The pack date can be a Saturday or Sunday because BTC trades every day; use real stock-market trading days
     sessions = market.sessions_from_prices(storage.price_matrix("adj_close"))
     pack["as_of"] = str(sessions[-1].date()) if len(sessions) else pack["as_of"]
 
@@ -288,7 +288,7 @@ def build_request(kind: str, plan_id: str, now: datetime | None = None,
     ]
     out += universe_lines
 
-    # --- สถานะพอร์ต
+    # --- Portfolio state
     out += ["## พอร์ตของคุณตอนนี้", ""]
     if prev_id is None:
         out += ["ยังไม่มีแผนก่อนหน้า — นี่คือ**แผนแรก** น้ำหนักตั้งต้นของ satellite คือ control: "
@@ -330,7 +330,7 @@ def build_request(kind: str, plan_id: str, now: datetime | None = None,
     out += [f"- [{a.get('severity')}] {a.get('at', '')[:16]} {a.get('title')}: {a.get('detail', '')}" for a in alerts] or ["*ไม่มี*"]
     out.append("")
 
-    # --- ตลาด
+    # --- Market
     vol = pack.get("volatility", {})
     breadth = pack.get("breadth", {})
     out += [

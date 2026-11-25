@@ -1,11 +1,11 @@
-"""ชั้น 2–3 ของ scanner ไทย — Sonnet คัดกรอง แล้ว Opus ดำลึก ≤ 2 ตัว/วัน
+"""Stages 2 and 3 of the Thai scanner: Sonnet screens, then Opus digs into <= 2 stocks a day.
 
-ใช้ schema ตัวเดียวกับ scanner US (finbg/scan/triage.py, deepdive.py) — ผลของสองตลาดจึงมีหน้าตาเดียวกัน
-และคิดคะแนน triage IC ด้วยโค้ดเดียวกันได้ · สิ่งที่ต่างคือบริบทในพรอมต์:
+Uses the same schema as the US scanner (finbg/scan/triage.py, deepdive.py), so results from both markets look the same
+and triage IC can be scored with the same code. What differs is the context in the prompt:
 
-- **ข่าวไทยมีข่าวประชาสัมพันธ์ที่บริษัทส่งเองเยอะมาก** (รางวัล CSR งานอีเวนต์) — ต้องบอกให้แยกออก
-- **ไม่มีประกาศต้นทางของ SET** (ผู้ใช้เลือกใช้ข่าวจากสื่อแทน 2026-11-08) — ตัวเลขทุกตัวคือ "ตามที่สื่อรายงาน"
-- **ต้นทุนไป-กลับ ~1%** (tick ของ SET + ค่าคอม) — โอกาสที่เล็กกว่านั้นไม่คุ้มแม้จะถูก
+- **Thai news carries many company-issued press releases** (CSR awards, events); the model is told to separate them out
+- **There are no original SET announcements** (the owner chose media news instead, 2026-11-08), so every figure is "as reported by the media"
+- **A round trip costs about 1%** (SET tick + commission), so smaller opportunities are not worth it even when right
 """
 
 from __future__ import annotations
@@ -63,15 +63,15 @@ def _local(stamp: str) -> str:
 
 
 def clean(summary: str) -> str:
-    """บทคัดย่อจาก RSS เป็น HTML ดิบ (<p>, &#160;, ท้ายข่าว "The post ... appeared first on" ของ WordPress)
-    คลังเก็บดิบไว้ตามหลัก PIT — ทำความสะอาดตอนอ่านเท่านั้น"""
+    """RSS summaries are raw HTML (<p>, &#160;, WordPress's trailing "The post ... appeared first on").
+    The store keeps them raw, as point-in-time requires; they are cleaned only when read."""
     text = html.unescape(re.sub(r"<[^>]+>", " ", summary or ""))
     text = re.split(r"The post |\[…\]|\[\.\.\.\]", text)[0]
     return re.sub(r"\s+", " ", text).strip()
 
 
 def _num(value: Any, spec: str) -> str:
-    """ตัวเลขจากตาราง 59 อาจว่าง (เช่น รายการโอน) — แสดง "—" แทนที่จะทำทั้งพรอมต์พัง"""
+    """Figures from the Form 59 table can be empty (for example transfers); show "—" instead of breaking the whole prompt"""
     return "—" if value is None or pd.isna(value) else format(value, spec)
 
 
@@ -111,7 +111,7 @@ def triage(candidates: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def pick(output: dict[str, Any], allowed: set[str]) -> list[str]:
-    """ตัวที่ Sonnet ส่งไปดำลึก เรียงด้วยสูตรเดียวกับ US (information_value × overlooked) — ไม่เกิน 2 ตัว"""
+    """Stocks Sonnet sends for a deep dive, ranked by the same formula as the US side (information_value x overlooked); at most 2"""
     bases = {a.removesuffix(".BK") for a in allowed}
     chosen = [c for c in output.get("candidates") or [] if c.get("deep_dive") and str(c.get("ticker", "")).upper() in bases]
     chosen.sort(key=lambda c: -(c["information_value"] * c["overlooked"]))
@@ -120,7 +120,7 @@ def pick(output: dict[str, Any], allowed: set[str]) -> list[str]:
 
 def deep_prompt(picks: list[str], by_ticker: dict[str, dict[str, Any]],
                 session: pd.Timestamp) -> tuple[str, dict[str, dict[str, str]], list[dict[str, Any]]]:
-    """ข้อความให้ Opus + ตาราง ID ของหลักฐาน + เนื้อข่าวที่ดึงมา (เก็บลงคลังแล้วใน articles.read)"""
+    """Text for Opus + the evidence ID table + the fetched article text (already stored by articles.read)"""
     refs: dict[str, dict[str, str]] = {}
 
     def ref(url: str, title: str) -> str:
@@ -135,7 +135,7 @@ def deep_prompt(picks: list[str], by_ticker: dict[str, dict[str, Any]],
     volume = stocks.pivot(index="date", columns="ticker", values="volume").sort_index().loc[:session]
     returns = adj.pct_change(fill_method=None)
     value = (close * volume).rolling(config.TH_SCAN_TRADABLE_DAYS, min_periods=10).median()
-    market = returns.where(value >= config.TH_TRADABLE_MIN_VALUE).mean(axis=1) * 100   # หุ้นที่ซื้อขายได้ทั้งหมดถือเท่ากัน
+    market = returns.where(value >= config.TH_TRADABLE_MIN_VALUE).mean(axis=1) * 100   # All tradable stocks, equally weighted
 
     lines = [f"# ดำลึก {len(picks)} ตัว — ราคาถึงวันทำการ {session.date()} · ข่าวถึงเวลาตัดสินใจ", ""]
     fetched: list[dict[str, Any]] = []

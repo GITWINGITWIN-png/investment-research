@@ -1,21 +1,21 @@
-"""ชั้น 1 — ให้คะแนนความผิดปกติทั้งตลาดด้วยโค้ด (0 token) แล้วคัดเหลือ 30 ตัว
+"""Stage 1: score unusual activity across the whole market in code (0 tokens) and keep 30 stocks.
 
-## คะแนนมาจากอะไร
+## Where the score comes from
 
-| ส่วน | เงื่อนไข | คะแนน |
+| Part | Condition | Score |
 |---|---|---|
-| ราคาผิดปกติ | วันเดียว ≥ 2.5σ และ ≥ 3% · หรือ 5 วัน ≥ 2.5σ และ ≥ 8% | 1–4 ตามความแรง |
-| ปริมาณผิดปกติ | ≥ 2.5 เท่าของมัธยฐาน 20 วัน | 0.3–2 |
-| 8-K | ตามหัวข้อ: critical 3 · high 2 · สัญญา/ซื้อขายกิจการ/เปลี่ยนผู้ควบคุม 1.5 · งบ 0.8 · อื่น 0.4 | รวมสูงสุด 3.5 |
-| 13D | นักลงทุนเคลื่อนไหวถือเกิน 5% (ฉบับแก้ 1.2) | 2.5 |
-| คนในซื้อ | ≥ 2 คนซื้อในตลาดรวม ≥ $100k ใน 10 วัน · หรือผู้บริหารคนเดียว ≥ $250k | 1.5–3.5 |
-| งบ | surprise จากที่คาด (ใน 3 วัน) | 0–3 |
+| Unusual price | one day >= 2.5 sigma and >= 3%, or 5 days >= 2.5 sigma and >= 8% | 1 to 4 by strength |
+| Unusual volume | >= 2.5 times the 20-day median | 0.3 to 2 |
+| 8-K | by item: critical 3, high 2, contracts/M&A/change of control 1.5, results 0.8, other 0.4 | at most 3.5 in total |
+| 13D | an activist holding more than 5% (amendments 1.2) | 2.5 |
+| Insider buying | >= 2 insiders buying >= $100k in total within 10 days, or one executive >= $250k | 1.5 to 3.5 |
+| Earnings | surprise against the estimate (within 3 days) | 0 to 3 |
 
-แล้วคูณด้วย **ตัวคูณ "คนมองข้าม"**: นักวิเคราะห์ ≤ 3 คน ×1.5 · ≤ 8 คน ×1.2 ·
-มูลค่า < $2B ×1.3 · < $10B ×1.15 · ≥ $200B ×0.5 (หุ้นที่ทั้งโลกดูอยู่ โอกาสที่คนพลาดแทบไม่มี)
+Then multiply by the **"overlooked" multiplier**: <= 3 analysts x1.5, <= 8 analysts x1.2,
+market cap < $2B x1.3, < $10B x1.15, >= $200B x0.5 (stocks the whole world watches leave almost nothing to miss).
 
-น้ำหนักพวกนี้ **ตั้งจากเหตุผล ยังไม่ได้ปรับจากผลลัพธ์** — พอร์ตไอเดียจะบอกเองว่าส่วนไหนมีค่า
-(book.py เก็บผลของผู้เข้ารอบทั้ง 30 ตัวทุกวัน ไม่ใช่แค่ตัวที่ถูกเลือก)
+These weights are **set by reasoning, not yet tuned on outcomes**; the idea portfolio will show which parts have value
+(book.py records the outcome of all 30 finalists every day, not only the chosen ones).
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _item_points(items: list[str]) -> float:
 
 
 def insider_summary(insider: pd.DataFrame) -> dict[str, dict[str, Any]]:
-    """การซื้อในตลาด (code P) ของคนใน — ไม่นับการรับหุ้นเป็นค่าตอบแทน/การใช้สิทธิ์/แผน 10b5-1"""
+    """Open-market purchases (code P) by insiders; shares received as pay, option exercises and 10b5-1 plans are not counted"""
     if insider.empty:
         return {}
     buys = insider[(insider["code"] == "P") & (insider["direction"] == "A") & (~insider["plan_10b5_1"].astype(bool))]
@@ -49,7 +49,7 @@ def insider_summary(insider: pd.DataFrame) -> dict[str, dict[str, Any]]:
         executives = group[group["officer"] | group["director"]]
         holders = group[group["ten_percent"]] if "ten_percent" in group else group.iloc[0:0]
         out[ticker] = {
-            "buyers": int(group["owner"].nunique()),       # 1 คน = 1 กลุ่มผู้ยื่น (นิติบุคคลในเครือเดียวกันนับรวม)
+            "buyers": int(group["owner"].nunique()),       # 1 person = 1 filer group (affiliated entities count together)
             "value": float(group["value"].sum()),
             "executive_value": float(executives["value"].sum()),
             "holder_value": float(holders["value"].sum()),
@@ -62,7 +62,7 @@ def insider_summary(insider: pd.DataFrame) -> dict[str, dict[str, Any]]:
 def score(universe: pd.DataFrame, base: pd.DataFrame, events: list[dict[str, Any]],
           insider: dict[str, dict[str, Any]], reported: list[dict[str, Any]],
           coverage: dict[str, int | None], cik_tickers: dict[int, list[str]]) -> pd.DataFrame:
-    """คืนตารางทุกตัวที่ได้คะแนน > 0 เรียงจากมากไปน้อย พร้อมเหตุผล"""
+    """Return a table of every stock with a score > 0, highest first, with reasons"""
     tradable = set(universe["ticker"])
     per_ticker_events: dict[str, list[dict[str, Any]]] = {}
     for event in events:
@@ -110,7 +110,7 @@ def score(universe: pd.DataFrame, base: pd.DataFrame, events: list[dict[str, Any
                 parts["insider"] = 1.5 + min(1.0, math.log10(buys["executive_value"] / config.INSIDER_SINGLE_BIG_BUY))
                 reasons.append(f"ผู้บริหารซื้อในตลาด ${buys['executive_value']:,.0f}")
             elif buys["holder_value"] >= config.INSIDER_HOLDER_BIG_BUY:
-                # ผู้ถือเกิน 10% ซื้อเพิ่มด้วยเงินก้อนใหญ่ — มักเป็นกองทุนที่ทำการบ้านมาแล้ว
+                # Holders above 10% buying more with large amounts, usually funds that have done their homework
                 parts["insider"] = 1.5 + min(1.0, math.log10(buys["holder_value"] / config.INSIDER_HOLDER_BIG_BUY))
                 reasons.append(f"ผู้ถือเกิน 10% ซื้อในตลาด ${buys['holder_value']:,.0f}")
 

@@ -1,27 +1,27 @@
-"""หุ้นไทยใน harness — factor ช้าเฉพาะหุ้นที่ซื้อขายได้จริง หักต้นทุนตาม tick ของ SET (แทร็กไทย ขั้น 2 · โน้ต 13)
+"""Thai stocks in the harness: slow factors in really tradable stocks only, net of SET tick costs (Thai track, stage 2; note 13).
 
-    uv run finlab thai-prices     ราคา 10 ปีของหุ้นไทยทุกตัวในคลังรายชื่อของ finbg/th (~2 นาที)
-    uv run finlab thai            รายงาน → Journal/Research/thai-factors-<วันที่>.md
+    uv run finlab thai-prices     10 years of prices for every Thai stock in finbg/th's list store (about 2 minutes)
+    uv run finlab thai            report -> Journal/Research/thai-factors-<date>.md
 
-## ⚠️ ผลชุดนี้คือ "การสำรวจ" ไม่ใช่ "การพิสูจน์"
+## ⚠️ These results are "exploration", not "proof"
 
-ข้อมูลช่วงเดียวกันถูกดูไปแล้วตอนตัดสินใจเปิดแทร็กไทย (2026-11-08) — วัดซ้ำบนข้อมูลเดิมไม่ใช่การทดสอบ
-ทุกครั้งที่รันถูกบันทึกลง experiments.jsonl (family "thai") ให้ Deflated Sharpe นับจำนวนครั้งที่ลองได้ถูก
-การพิสูจน์จริงต้องใช้ช่วงหลังวันนี้เท่านั้น
+The same period was already looked at when deciding to start the Thai track (2026-11-08); measuring again on the same data is not a test.
+Every run is logged to experiments.jsonl (family "thai") so the Deflated Sharpe counts the tries correctly.
+Real proof can only use the period after today.
 
-## ⚠️ survivorship — แก้ย้อนหลังไม่ได้ด้วยข้อมูลฟรี
+## ⚠️ Survivorship cannot be fixed backwards with free data
 
-หุ้นที่ถูกเพิกถอนหายจาก Yahoo ทั้งประวัติ (ทดสอบ 2026-11-08: STARK, EIC, EARTH, JKN = 0 แถว)
-แหล่งที่มีคือ SETSMART (เสียเงิน) · finbg/th เก็บรายชื่อทุกวันตั้งแต่ 2026-11-08 → ช่วงหลังจากนี้ไร้ survivorship
-ผลกระทบ: momentum ดูดีเกินจริง (ผู้แพ้ที่ถูกถอดหายไปจากตาราง) · low-vol น่าจะดูแย่กว่าจริงเล็กน้อย
-(หุ้นที่ถูกถอดมักผันผวนสูงและขาดทุนหนัก — ถ้ามีอยู่ในตาราง low-vol จะชนะห่างขึ้น)
+Delisted stocks vanish from Yahoo with their whole history (tested 2026-11-08: STARK, EIC, EARTH, JKN = 0 rows).
+The only source that has them is SETSMART (paid); finbg/th has stored the list daily since 2026-11-08, so the period from then on is survivorship-free.
+Effect: momentum looks better than it is (delisted losers vanish from the table); low-vol probably looks slightly worse than it is
+(delisted stocks are usually volatile and lose heavily; with them in the table, low-vol would win by more).
 
-## สามอย่างที่ต่างจากการวัดฝั่ง US
+## Three differences from the US measurement
 
-1. **เฉพาะหุ้นที่ซื้อขายได้จริง** (มัธยฐาน ≥ ฿5M/วัน · ราคา ≥ ฿2) — สัญญาณในหุ้นที่ซื้อไม่ได้ไม่มีความหมาย
-2. **ต้นทุนรายตัวตาม tick** (costs.tick_round_trip) แทน bps คงที่
-3. **แยกตลาดขึ้น/ลง** — ตลาดไทย 2018–2025 เป็นขาลงยาว low-vol อาจดูดีเพราะ "ลงน้อยกว่า" (beta ต่ำ)
-   ไม่ใช่เพราะชนะจริง · ถ้าชนะเฉพาะตอนตลาดลง = เป็นการถือ beta ต่ำ ไม่ใช่ alpha
+1. **Only really tradable stocks** (median >= ฿5M a day, price >= ฿2); signals in stocks that cannot be bought mean nothing
+2. **Per-stock tick costs** (costs.tick_round_trip) instead of fixed bps
+3. **Up and down markets separately**: the Thai market in 2018 to 2025 was a long decline, so low-vol may look good because it "fell less" (low beta),
+   not because it really won; winning only in down markets means holding low beta, not alpha
 """
 
 from __future__ import annotations
@@ -43,11 +43,11 @@ from .metrics import ic_summary, rank_ic
 
 PRICES_PATH = RESEARCH / "th_prices.parquet"
 REPORTS = fconfig.JOURNAL / "Research"
-CLEAN_LIMIT = 0.35          # SET ขยับได้ไม่เกิน ±30%/วัน → ราคาปรับแล้วที่ขยับเกินนี้คือข้อมูลเสีย
-REBALANCE = 21              # ปรับพอร์ตเดือนละครั้ง — สัญญาณช้า ต้นทุนจึงพอไหว
+CLEAN_LIMIT = 0.35          # SET moves at most ±30% a day, so an adjusted price that moves more than this is bad data
+REBALANCE = 21              # Rebalance once a month; the signals are slow, so the costs are bearable
 HORIZONS = (5, 21, 63)
 FACTORS = {"low_vol_60d": factors.low_vol_60d, "momentum_12_1": factors.momentum_12_1,
-           "reversal_1m": factors.reversal_1m}   # reversal ใส่ไว้เทียบ: เป็นสัญญาณเร็ว คาดว่าแพ้ต้นทุน
+           "reversal_1m": factors.reversal_1m}   # reversal is included for comparison: a fast signal, expected to lose to costs
 
 
 def download_prices(years: int = 10) -> dict[str, Any]:
@@ -70,11 +70,11 @@ def load() -> dict[str, pd.DataFrame]:
 
 
 def clean_price(adj_close: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """ดัชนีราคาที่ตัดวันข้อมูลเสีย (|ผลตอบแทน| > 35%) ออก + ตารางว่าวันไหนถูกตัด
+    """Price index with bad-data days (|return| > 35%) removed, plus a table of which days were removed.
 
-    ข้อมูลฟรีของหุ้นไทยมีจุดเสียมากกว่า US ~10 เท่า (แตกพาร์/เพิ่มทุนที่ปรับราคาผิด)
-    ถ้าปล่อยไว้ หุ้นที่ "กระโดด 300%" ปลอม ๆ จะครองอันดับ momentum ทั้งตาราง
-    ไม่ตัดหุ้นตัวนั้นทิ้งทั้งตัว (นั่นคือการเลือกจากข้อมูลอนาคต) — แค่ไม่นับวันที่เสีย
+    Free Thai stock data has about 10 times more bad points than US data (splits and capital increases adjusted wrongly).
+    Left in, stocks with a fake "300% jump" would dominate the momentum ranking.
+    The stock itself is not dropped (that would be selecting on future data); only the bad days are not counted.
     """
     r = adj_close.pct_change(fill_method=None)
     flagged = r.abs() > CLEAN_LIMIT
@@ -83,16 +83,16 @@ def clean_price(adj_close: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def tradable(w: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """ณ วัน t ซื้อขายได้จริงไหม — ใช้ข้อมูลถึงวัน t เท่านั้น (มัธยฐาน 60 วันย้อนหลัง)"""
+    """Whether a stock is really tradable on day t, using data up to day t only (60-day trailing median)"""
     value = (w["close"] * w["volume"]).rolling(60, min_periods=40).median()
     return (value >= fconfig.TH_TRADABLE_MIN_VALUE) & (w["close"] >= fconfig.TH_TRADABLE_MIN_PRICE) & (w["volume"] > 0)
 
 
 def portfolio(factor: pd.DataFrame, fwd: pd.DataFrame, mask: pd.DataFrame, cost: pd.DataFrame) -> pd.DataFrame:
-    """long-only หุ้น 20% บนสุด ถือเท่ากัน ปรับทุก 21 วัน — เทียบกับหุ้นที่ซื้อขายได้ทั้งหมดถือเท่ากัน
+    """Long-only top 20% of stocks, equally weighted, rebalanced every 21 days, against all tradable stocks equally weighted.
 
-    ต้นทุนต่อรอบ = สัดส่วนพอร์ตที่เปลี่ยน × ต้นทุนไป-กลับเฉลี่ยของตัวที่ซื้อเข้า (tick + ค่าคอม)
-    รอบแรกเป็นการซื้อเข้าอย่างเดียว จึงคิดครึ่งรอบ
+    Cost per rebalance = share of the portfolio changed x average round-trip cost of the stocks bought (tick + commission).
+    The first rebalance is only buying, so it counts as half a round trip.
     """
     rows, held = [], set()
     for day in factor.index[::REBALANCE]:
@@ -118,7 +118,7 @@ def run() -> dict[str, Any]:
     mask = tradable(w)
     cost = costs.tick_round_trip(w["close"], fconfig.TH_TICKS, fconfig.TH_COMMISSION_ROUND_TRIP)
     fwd = {h: forward_returns(price, h) for h in HORIZONS}
-    market_21 = fwd[21].where(mask).mean(axis=1)                       # หุ้นที่ซื้อขายได้ทั้งหมดถือเท่ากัน
+    market_21 = fwd[21].where(mask).mean(axis=1)                       # All tradable stocks, equally weighted
     up_days = market_21[market_21 > 0].index
     recent_start = price.index[-1] - pd.DateOffset(years=2)
     period = (str(price.index[0].date()), str(price.index[-1].date()))
@@ -162,7 +162,7 @@ def run() -> dict[str, Any]:
                                        "cost": "tick+commission"},
                         {**block["ic"]["21d"], **block["portfolio"]}, int(price.shape[1]), period)
 
-    # Deflated Sharpe: หักจำนวนครั้งที่ลองในตระกูล "thai" ทั้งหมด (รวมรอบก่อน ๆ) ไม่ใช่แค่ 3 ตัวในรอบนี้
+    # Deflated Sharpe: deflate by every try in the "thai" family (including earlier rounds), not just the 3 in this round
     per_period = {name: s.mean() / s.std() for name, s in nets.items()}
     best = max(per_period, key=per_period.get)
     trials = max(experiments.count("thai"), len(nets))

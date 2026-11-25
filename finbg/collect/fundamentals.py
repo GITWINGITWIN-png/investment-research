@@ -1,27 +1,27 @@
-"""งบการเงินจาก SEC XBRL (companyfacts) — ข้อมูล point-in-time โดยธรรมชาติ
+"""Financial statements from SEC XBRL (companyfacts): point-in-time data by nature.
 
-## ทำไมแหล่งนี้ดีกว่าที่คิด
+## Why this source is better than it looks
 
-ทุกตัวเลขใน companyfacts มาพร้อม:
-  `end`    = วันสิ้นงวด (event_date)
-  `filed`  = วันที่ยื่นต่อ SEC (knowledge_date) ← หัวใจของ PIT
-  `accn`   = เลขที่เอกสาร (ย้อนไปดูต้นฉบับได้)
-และเก็บ "ตัวเลขตามที่ยื่นแต่ละครั้ง" แยกกัน — ถ้าบริษัทแก้งบย้อนหลัง
-ตัวเลขใหม่จะเป็น fact ใหม่ที่ `filed` ช้ากว่า ตัวเลขเดิมไม่ถูกเขียนทับ
-→ ถาม "ณ วันที่ t รู้อะไรบ้าง" ได้ตรง ๆ ด้วย `filed <= t` (ตรงตามโน้ต 09 ส่วนที่ 4)
+Every figure in companyfacts comes with:
+  `end`    = end of the period (event_date)
+  `filed`  = date filed with the SEC (knowledge_date), the core of point-in-time
+  `accn`   = accession number (leads back to the original document)
+and each filing's figures are kept separately: if a company restates,
+the new figure is a new fact with a later `filed`, and the old figure is not overwritten.
+So "what was known on date t" is simply `filed <= t` (as in note 09, part 4).
 
-## ข้อจำกัดที่ต้องรู้
+## Limits to know
 
-- ตัวเลขเข้ามาตอนยื่น 10-Q/10-K ซึ่งช้ากว่าวันประกาศงบ (8-K 2.02) ราว 1–5 สัปดาห์
-  → ข้อมูลที่นี่ "ช้ากว่าตลาด" เสมอ = ปลอดภัยจาก look-ahead แต่ไม่ใช่ข่าวใหม่
-- งบกระแสเงินสดรายงานแบบสะสมทั้งปี (3/6/9/12 เดือน) ไม่มีรายไตรมาส
-  ต้องลบกันเองเพื่อได้ยอดรายไตรมาส — ดู `discrete_quarters()`
-- ธนาคารใช้ concept ต่างจากบริษัททั่วไป (ไม่มี gross profit, capex) → บางช่องเป็น None
-  ซึ่งถูกต้องกว่าการยัดตัวเลขที่ไม่มีความหมาย
-- **companyfacts ของ SEC ตกหล่นบาง filing** — พบจริง 2026-10-24: KO ยื่น 10-Q ไตรมาส 2
-  พร้อม XBRL เมื่อ 29 ก.ค. แต่ API ยังไม่มีตัวเลขชุดนั้น (DUK, XOM, NEE, PLD อาการเดียวกัน)
-  จึงยอมรับตัวเลขเก่าได้ถึง ~300 วัน และ `summary()` ติดธง `stale` ให้เห็นชัด
-  แทนที่จะซ่อนบริษัทนั้นไปทั้งแถว
+- Figures arrive with the 10-Q/10-K, about 1 to 5 weeks after the earnings release (8-K 2.02),
+  so this data always lags the market: safe from look-ahead, but not news.
+- Cash-flow statements are reported year to date (3/6/9/12 months), not per quarter;
+  quarterly values come from subtracting them, see `discrete_quarters()`.
+- Banks use different concepts from other companies (no gross profit, no capex), so some fields are None,
+  which is more correct than forcing in a meaningless number.
+- **SEC companyfacts misses some filings.** Seen 2026-10-24: KO filed its Q2 10-Q with XBRL
+  on 29 July, but the API did not have those figures yet (DUK, XOM, NEE and PLD showed the same).
+  So figures up to about 300 days old are accepted, and `summary()` sets a `stale` flag
+  instead of hiding the company's whole row.
 """
 
 from __future__ import annotations
@@ -38,20 +38,20 @@ from .sources import sec as sec_source
 
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 
-# ช่วงจำนวนวันของงวด — กว้างพอรองรับปีบัญชี 52/53 สัปดาห์ (ไตรมาส 13 หรือ 14 สัปดาห์)
+# Period length in days, wide enough for 52/53-week fiscal years (13- or 14-week quarters)
 QUARTER_DAYS = (80, 100)
 YEAR_DAYS = (350, 380)
-# ตัวเลขที่เก่ากว่านี้ถือว่า "ไม่มี" — ดีกว่าแสดงตัวเลขเมื่อหลายปีก่อนเหมือนเป็นปัจจุบัน
+# Figures older than this count as "missing"; better than showing numbers from years ago as current
 MAX_FLOW_AGE_DAYS = 300
 MAX_INSTANT_AGE_DAYS = 400
-STALE_AFTER_DAYS = 135     # งวดล่าสุดเก่ากว่านี้ = พลาดไปแล้วอย่างน้อย 1 ไตรมาส
+STALE_AFTER_DAYS = 135     # A latest period older than this means at least one quarter was missed
 SHARE_METRICS = {"shares_out", "diluted_shares"}
 
 
-# --- เก็บ --------------------------------------------------------------------
+# --- Collect --------------------------------------------------------------------
 
 def _extract(ticker: str, cik: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """ดึงเฉพาะ concept ที่ใช้ จาก JSON ก้อนใหญ่ (4–8 MB) เหลือไม่กี่พันแถว"""
+    """Keep only the concepts in use, cutting a large JSON (4 to 8 MB) down to a few thousand rows"""
     rows: list[dict[str, Any]] = []
     facts = payload.get("facts", {})
     for metric, candidates in config.FUNDAMENTAL_CONCEPTS.items():
@@ -92,7 +92,7 @@ def _previous_counts() -> dict[str, int]:
 
 
 def collect(tickers: list[str] | None = None) -> dict[str, Any]:
-    """ดึง companyfacts ของทุกหุ้นใน watchlist แล้วเก็บเป็นตารางเดียว"""
+    """Fetch companyfacts for every watchlist stock and store them as one table"""
     storage.ensure_dirs()
     targets = tickers or config.WATCHLIST
     cik_map = sec_source._ticker_to_cik()
@@ -114,8 +114,8 @@ def collect(tickers: list[str] | None = None) -> dict[str, Any]:
             for old_cik in config.SEC_PREDECESSOR_CIKS.get(ticker, []):
                 time.sleep(config.SEC_MIN_INTERVAL_SEC)
                 extracted.extend(_fetch_one(ticker, old_cik))
-            # API ของ SEC เคยคืนข้อมูลไม่ครบชั่วคราว (เหลือแค่ filing ล่าสุดฉบับเดียว)
-            # ถ้าจำนวน fact หดลงเกินครึ่งจากรอบก่อน ลองใหม่อีกครั้ง — ของจริงไม่หดแบบนั้น
+            # The SEC API has temporarily returned incomplete data (only the single latest filing)
+            # If the number of facts shrinks by more than half since the last round, retry once; real data does not shrink like that
             if previous.get(ticker) and len(extracted) < previous[ticker] * 0.5:
                 time.sleep(2.0)
                 retry = _fetch_one(ticker, cik)
@@ -148,7 +148,7 @@ def _last_fetch() -> datetime | None:
 
 
 def due(now: datetime | None = None) -> tuple[bool, str]:
-    """ควรดึงงบใหม่ไหม — เก่าเกินกำหนด หรือมี 10-Q/10-K ใหม่ของ watchlist เข้ามา"""
+    """Whether to refetch financials: they are stale, or a new 10-Q/10-K for the watchlist has arrived"""
     import json
 
     now = now or storage.utc_now()
@@ -177,21 +177,21 @@ def due(now: datetime | None = None) -> tuple[bool, str]:
     return False, "ยังสดอยู่"
 
 
-# --- อ่านแบบ point-in-time ------------------------------------------------------
+# --- Point-in-time reads ------------------------------------------------------
 
 def load_facts(as_of: datetime | None = None) -> pd.DataFrame:
-    """fact ทั้งหมดที่ **รู้ได้ ณ เวลา as_of** (None = ทั้งหมดที่มีตอนนี้)
+    """Every fact that **could be known at as_of** (None = everything available now).
 
-    เงื่อนไข `filed < วันที่ของ as_of` เข้มกว่า `<=` หนึ่งวันโดยตั้งใจ:
-    filing ที่ยื่นช่วงเย็นของวันนั้นอาจยังไม่มีใครเห็น ณ เวลาที่ถาม
-    สำหรับงวดเดียวกันที่ยื่นหลายครั้ง (งบแก้ไข) เก็บฉบับล่าสุดที่รู้ ณ ตอนนั้น
+    The condition `filed < date of as_of` is one day stricter than `<=` on purpose:
+    a filing made late that day may not have been seen by anyone at the time of the query.
+    For a period filed several times (restatements), keep the latest version known at that time.
     """
     files = sorted(config.RAW_FUNDAMENTALS.glob("*.parquet"))
     if not files:
         return pd.DataFrame()
-    # รวมทุก snapshot ไม่ใช่แค่ไฟล์ล่าสุด — fact แต่ละตัวคือบันทึก "ยื่นอะไร เมื่อไหร่"
-    # ที่ไม่เปลี่ยน แต่ API ของ SEC คืนข้อมูลไม่ครบในบางรอบ (พบจริง: XOM รอบหนึ่งได้
-    # revenue 127 แถว อีกรอบไม่กี่นาทีต่อมาได้ 4 แถว) การรวมจึงได้ความรู้ที่ครบที่สุด
+    # Merge every snapshot, not only the latest file: each fact records "what was filed, and when"
+    # and never changes, but the SEC API returns incomplete data in some rounds (seen: XOM got
+    # 127 revenue rows in one round and 4 rows a few minutes later), so merging gives the most complete record
     df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
     df = df.drop_duplicates(
         ["ticker", "metric", "concept", "unit", "start", "end", "val", "filed", "accn"]
@@ -208,11 +208,11 @@ def load_facts(as_of: datetime | None = None) -> pd.DataFrame:
 
 
 def discrete_quarters(facts: pd.DataFrame) -> pd.Series:
-    """ยอดรายไตรมาส (index = วันสิ้นงวด) จาก fact แบบ 3 เดือน และแบบสะสม YTD
+    """Quarterly values (index = period end) from 3-month facts and year-to-date facts.
 
-    1. fact ที่ยาว ~3 เดือน คือยอดไตรมาสอยู่แล้ว
-    2. ไตรมาสที่ไม่มีตัวเลขตรง (เช่น Q4 หรือกระแสเงินสดทุกไตรมาส) ได้จากการลบยอดสะสม
-       ที่เริ่มวันเดียวกัน: Q2 = 6 เดือน − 3 เดือน, Q4 = ทั้งปี − 9 เดือน
+    1. A fact covering about 3 months is already a quarterly value.
+    2. Quarters without a direct figure (such as Q4, or every quarter of cash flow) come from subtracting
+       year-to-date values that start on the same day: Q2 = 6 months - 3 months, Q4 = full year - 9 months.
     """
     flows = facts.dropna(subset=["start", "end", "val"]).copy()
     if flows.empty:
@@ -243,9 +243,9 @@ def _chain_ok(index: pd.DatetimeIndex) -> bool:
 
 
 def ttm(facts: pd.DataFrame, today: pd.Timestamp) -> dict[str, Any] | None:
-    """ยอด 12 เดือนล่าสุด (TTM) + TTM ของปีก่อนหน้า (ไว้คิดการเติบโต)
+    """Trailing 12 months (TTM) plus the prior year's TTM (for growth).
 
-    ลองรวม 4 ไตรมาสล่าสุดที่ต่อเนื่องกันก่อน ถ้าไม่ได้ ใช้ตัวเลขทั้งปีล่าสุดแทน
+    First try summing the latest 4 consecutive quarters; otherwise use the latest full-year figure.
     """
     quarters = discrete_quarters(facts)
     result: dict[str, Any] | None = None
@@ -286,8 +286,8 @@ def _latest_instant(facts: pd.DataFrame, today: pd.Timestamp) -> tuple[float, pd
 
 
 def _shares(group: pd.DataFrame, today: pd.Timestamp) -> float | None:
-    """จำนวนหุ้นทั้งหมด — บริษัทที่มีหลายชนิดหุ้น (GOOGL มี A/B/C) รายงานแยกต่อชนิด
-    ภายในเอกสารเดียวกัน จึงรวมตาม accn ของเอกสารล่าสุด
+    """Total shares outstanding. Companies with several share classes (GOOGL has A/B/C) report each class
+    separately in the same document, so they are summed by the accn of the latest document.
     """
     cover = group[group["metric"] == "shares_out"].dropna(subset=["end", "val"])
     if not cover.empty:
@@ -306,11 +306,11 @@ def _shares(group: pd.DataFrame, today: pd.Timestamp) -> float | None:
 
 
 def _pick_concept(group: pd.DataFrame, metric: str, today: pd.Timestamp | None = None) -> pd.DataFrame:
-    """บริษัทหนึ่งอาจมีหลาย concept ของ metric เดียว (เปลี่ยนชื่อตามมาตรฐานบัญชี)
+    """A company may use several concepts for one metric (renamed as accounting standards change).
 
-    กติกาทั่วไป: เลือกตัวที่มีงวดล่าสุด — เสมอกันให้ใช้ลำดับใน config
-    ยกเว้น revenue: ในบรรดาตัวที่งวดล่าสุดห่างกันไม่เกิน 1 ไตรมาส เลือกตัวที่ TTM ใหญ่ที่สุด
-    เพราะบริษัทแท็กทั้งยอดรวมและยอดย่อยพร้อมกันได้ (AMT, DUK) และยอดรวมใหญ่กว่าเสมอ
+    General rule: pick the one with the latest period; on a tie, use the order in config.
+    Exception for revenue: among concepts whose latest periods are within one quarter of each other, pick the
+    largest TTM, because companies can tag the total and a subtotal at once (AMT, DUK) and the total is always larger.
     """
     rows = group[group["metric"] == metric]
     if rows.empty:
@@ -341,9 +341,9 @@ def _ratio(numerator: float | None, denominator: float | None, positive_only: bo
 
 
 def facts_for(ticker: str, cik: str) -> pd.DataFrame:
-    """fact ของบริษัทใดก็ได้ (ไม่ต้องอยู่ใน watchlist) — ใช้ตอนสแกนทั้งตลาดแล้วต้องดูงบตัวที่ถูกเลือก
+    """Facts for any company (not only the watchlist), used after a whole-market scan to look at the selected stocks.
 
-    ไม่บันทึกลงคลัง (SEC เก็บย้อนหลังให้อยู่แล้ว) — คืนตารางรูปแบบเดียวกับ load_facts()
+    Not saved to the store (the SEC keeps the history anyway); returns a table in the same form as load_facts().
     """
     df = pd.DataFrame(_fetch_one(ticker, cik))
     if df.empty:
@@ -357,11 +357,11 @@ def facts_for(ticker: str, cik: str) -> pd.DataFrame:
 
 def summary(as_of: datetime | None = None, closes: dict[str, float] | None = None,
             facts: pd.DataFrame | None = None) -> dict[str, dict[str, Any]]:
-    """ตัวเลขสำคัญต่อบริษัท ณ เวลา as_of — ที่แผนรายสัปดาห์และ brief ใช้
+    """Key figures per company at as_of, as used by the weekly plan and the brief.
 
-    ราคาที่ใช้คิด valuation คือ `close` (ไม่ใช่ adj_close) เพราะ EPS เป็นต่อหุ้นจริง
-    ณ ตอนนั้น ส่วน adj_close ถูกปรับย้อนหลังด้วยเงินปันผล
-    `facts` = ส่งตารางมาเอง (เช่นจาก facts_for) แทนการอ่านคลัง
+    Valuation uses `close` (not adj_close) because EPS is per actual share
+    at that time, while adj_close is adjusted backwards for dividends.
+    `facts` = pass a table in (for example from facts_for) instead of reading the store.
     """
     facts = load_facts(as_of) if facts is None else facts
     if facts.empty:
@@ -390,7 +390,7 @@ def summary(as_of: datetime | None = None, closes: dict[str, float] | None = Non
         fcf = cfo - capex if cfo is not None and capex is not None else None
 
         def growth(block: dict[str, Any] | None, key_now: str = "value", key_then: str = "prior") -> float | None:
-            """% เติบโต — คืน None ถ้าฐานเป็นศูนย์/ติดลบ (เช่น กำไรพลิกจากขาดทุน ตีความเป็น % ไม่ได้)"""
+            """Percent growth; None when the base is zero or negative (a swing from loss to profit has no meaningful percentage)"""
             if not block:
                 return None
             now_value, then_value = block.get(key_now), block.get(key_then)

@@ -1,18 +1,18 @@
-"""พอร์ตไอเดียไทย + กลุ่มควบคุม — ตัวตัดสินว่า "Claude ที่อ่านข่าวภาษาไทย เลือกได้ดีกว่าสุ่มไหม" (โน้ต 13)
+"""Thai idea portfolio + control group: the judge of whether "Claude reading Thai news picks better than random" (note 13).
 
-กติกาเดียวกับพอร์ตไอเดีย US (finbg/scan/book.py) ยกเว้น 3 อย่างที่ตลาดไทยต่างจริง:
+The same rules as the US idea portfolio (finbg/scan/book.py) except for 3 things in which the Thai market really differs:
 
-| | US | ไทย |
+| | US | Thai |
 |---|---|---|
-| ต้นทุน | 30 bps ทุกตัว | **tick ของ SET ที่ราคาเข้า + ค่าคอม** รายตัว (~0.5–1.5%) |
-| benchmark | IWM / SPY | **หุ้นไทยที่ซื้อขายได้ทั้งหมด ณ วันเข้า ถือเท่ากัน** — Yahoo ไม่มีประวัติดัชนีไทย |
-| วันทำการเริ่มนับ | วันแรกที่ปิดหลังเวลาตัดสินใจ (16:00 ET) | วันแรกที่ปิดหลังเวลาตัดสินใจ (17:00 เวลาไทย) |
+| Cost | 30 bps for every stock | **SET tick at the entry price + commission**, per stock (about 0.5 to 1.5%) |
+| Benchmark | IWM / SPY | **all tradable Thai stocks on the entry date, equally weighted**; Yahoo has no Thai index history |
+| First counted day | the first day closing after the decision time (16:00 ET) | the first day closing after the decision time (17:00 Thai time) |
 
-benchmark ไม่กระทบคำถามหลัก: ไอเดียของ Claude กับกลุ่มสุ่มของรอบเดียวกันเทียบกับ benchmark ตัวเดียวกัน
-→ ส่วนต่าง "Claude − สุ่ม" ไม่ขึ้นกับว่าเลือก benchmark อะไร
+The benchmark does not affect the main question: Claude's ideas and the random group of the same round face the same benchmark,
+so the difference "Claude - random" does not depend on the benchmark chosen.
 
-ไฟล์ทั้งหมด append-only อยู่ที่ data/opportunities_th/ — ไม่ปนกับพอร์ต US
-สถิติ (Welch, Brier, triage IC) ใช้โค้ดชุดเดียวกับ US เพื่อให้สองตลาดถูกวัดเหมือนกันเป๊ะ
+All files are append-only in data/opportunities_th/, separate from the US portfolio.
+The statistics (Welch, Brier, triage IC) use the same code as the US side, so both markets are measured exactly alike.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ IDEAS = config.TH_OPPORTUNITIES / "ideas.jsonl"
 CONTROL = config.TH_OPPORTUNITIES / "control.jsonl"
 RESOLUTIONS = config.TH_OPPORTUNITIES / "resolutions.jsonl"
 VOIDED = config.TH_OPPORTUNITIES / "voided.jsonl"
-BENCHMARK = "EW_TRADABLE"                  # หุ้นที่ซื้อขายได้ทั้งหมด ณ วันเข้า ถือเท่ากัน
+BENCHMARK = "EW_TRADABLE"                  # Every tradable stock on the entry date, equally weighted
 
 
 def voided_runs() -> set[str]:
@@ -43,7 +43,7 @@ def voided_runs() -> set[str]:
 
 
 def void(created_at: str, reason: str) -> None:
-    """ยกเลิกได้เฉพาะเมื่อพบข้อมูลเข้าเสีย *ก่อน* วันเข้าพอร์ต และต้องเขียนเหตุผล (กติกาเดียวกับ US)"""
+    """A round can be voided only when bad input data is found *before* the entry date, with a written reason (the same rule as the US side)"""
     _append(VOIDED, [{"created_at": created_at, "reason": reason, "voided_at": storage.utc_stamp()}])
 
 
@@ -63,7 +63,7 @@ def record(session: str, created_at: str, candidates: list[dict[str, Any]],
     _append(IDEAS, booked)
 
     in_book = [i for i in booked if i["decision"] == "add_to_book"]
-    rng = random.Random(f"th-control-{session}")            # seed จากวันที่ → ทำซ้ำได้ ตรวจได้ว่าไม่ได้เลือก
+    rng = random.Random(f"th-control-{session}")            # Seed from the date, so it is reproducible and provably not hand-picked
     pool = [c["ticker"] for c in candidates]
     controls = rng.sample(pool, k=min(len(in_book), len(pool)))
     _append(CONTROL, [{"id": f"{session}@{run}-ctl-{n}", "session": session, "created_at": created_at,
@@ -80,7 +80,7 @@ def _entries() -> list[dict[str, Any]]:
 
 
 def effective_session(created_at: datetime, sessions: pd.DatetimeIndex) -> pd.Timestamp | None:
-    """วันทำการแรกที่ SET ปิด (17:00 เวลาไทย) หลังเวลาตัดสินใจ — คืน None ถ้าวันนั้นยังมาไม่ถึง"""
+    """First trading day on which SET closes (17:00 Thai time) after the decision time; None if that day has not come yet"""
     for day in sessions:
         if datetime.combine(day.date(), time(config.TH_BAR_FINAL_HOUR), tzinfo=config.LOCAL_TZ) > created_at:
             return day
@@ -88,7 +88,7 @@ def effective_session(created_at: datetime, sessions: pd.DatetimeIndex) -> pd.Ti
 
 
 def _adjusted_closes(tickers: list[str], start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    """ราคาปรับแล้ว (ปันผล/แตกพาร์) ชุดใหม่ล่าสุดจาก Yahoo — ใช้ชุดเดียวกันทั้งวันเข้าและวันออก"""
+    """The latest fresh adjusted prices (dividends and splits) from Yahoo; the same set is used for both entry and exit"""
     from ..datasource import yf
     frames = []
     for i in range(0, len(tickers), config.TH_CHUNK):
@@ -107,7 +107,7 @@ def _adjusted_closes(tickers: list[str], start: pd.Timestamp, end: pd.Timestamp)
 
 
 def resolve() -> dict[str, Any]:
-    """คิดผลทุกรายการที่ครบ 20 วันทำการแล้ว"""
+    """Compute the outcome of every entry that has reached 20 trading days"""
     done = {r["id"] for r in _read(RESOLUTIONS)}
     table = prices.read_all()
     if table.empty:
@@ -131,7 +131,7 @@ def resolve() -> dict[str, Any]:
     if not due:
         return {"ok": True, "resolved": 0}
 
-    # benchmark ของแต่ละวันเข้า: หุ้นที่ซื้อขายได้จริง ณ วันนั้น (ใช้ข้อมูลถึงวันนั้นเท่านั้น)
+    # Benchmark for each entry date: the stocks really tradable on that day (using data up to that day only)
     value = (close * volume).rolling(config.TH_SCAN_TRADABLE_DAYS, min_periods=10).median()
     tradable = {start: list(value.columns[(value.loc[start] >= config.TH_TRADABLE_MIN_VALUE)
                                           & (close.loc[start] >= config.TH_TRADABLE_MIN_PRICE)])
@@ -168,7 +168,7 @@ def resolve() -> dict[str, Any]:
 
 
 def _tick_cost(entry_price: float) -> float:
-    """ต้นทุนไป-กลับ = 1 tick ที่ราคาเข้า + ค่าคอม (สูตรเดียวกับ finlab.costs.tick_round_trip)"""
+    """Round-trip cost = 1 tick at the entry price + commission (the same formula as finlab.costs.tick_round_trip)"""
     lower = 0.0
     for upper, tick in config.TH_TICKS:
         if lower <= entry_price < upper:

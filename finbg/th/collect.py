@@ -1,7 +1,7 @@
-"""ขั้น 1 ของแทร็กไทย — เก็บรายชื่อ ราคา ข่าว วันละครั้ง (0 token · scripts/morning.sh เรียก)
+"""Stage 1 of the Thai track: collect the stock list, prices and news once a day (0 tokens; called by scripts/morning.sh).
 
-แต่ละขั้นล้มได้อิสระ (หลักเดียวกับ collect/news.py): Yahoo ล่มก็ยังได้ข่าว · feed หนึ่งพังก็ยังได้ราคา
-ลำดับสำคัญอย่างเดียว: รายชื่อต้องมาก่อน เพราะราคาและการติดป้ายข่าวใช้รายชื่อ
+Each step can fail independently (the same principle as collect/news.py): if Yahoo is down we still get news, and if a feed breaks we still get prices.
+Only one ordering matters: the stock list must come first, because prices and news tagging use it.
 """
 
 from __future__ import annotations
@@ -20,25 +20,25 @@ from . import insider, news, prices, universe
 def _guarded(step: Callable[..., dict[str, Any]], *args: Any) -> dict[str, Any]:
     try:
         return step(*args)
-    except Exception as exc:                              # noqa: BLE001 — ขั้นหนึ่งพังต้องไม่หยุดขั้นอื่น
+    except Exception as exc:                              # noqa: BLE001 (one failing step must not stop the others)
         return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
 
 
 def run(news_hours: int | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {"universe": _guarded(universe.snapshot)}
-    symbols = universe.ever_listed()                      # ใช้ snapshot เก่าได้ ถ้าวันนี้ screener ล่ม
+    symbols = universe.ever_listed()                      # An older snapshot is acceptable if the screener is down today
     if not symbols:
         reason = {"ok": False, "reason": "ยังไม่มีรายชื่อหุ้นในคลังเลย"}
         return {**result, "prices": reason, "news": reason, "insider": reason, "ok": False}
     result["prices"] = _guarded(prices.snapshot, symbols + config.TH_INDEXES)
     result["news"] = _guarded(news.collect, symbols, news_hours)
-    result["insider"] = _guarded(insider.collect)         # ต้องมาหลังข่าว — ใช้ลิงก์ตาราง 59 จาก feed
+    result["insider"] = _guarded(insider.collect)         # Must come after the news, because it uses the Form 59 table links from the feed
     result["ok"] = all(step.get("ok") for step in result.values())
     return result
 
 
 def tradable_now(table: pd.DataFrame) -> set[str]:
-    """หุ้นที่ซื้อขายได้จริง ณ แท่งล่าสุดในคลัง (มัธยฐานมูลค่าซื้อขาย 20 วัน · ราคาขั้นต่ำ)"""
+    """Stocks really tradable as of the latest stored bar (20-day median traded value, minimum price)"""
     if table.empty:
         return set()
     stocks = table[~table["ticker"].str.startswith("^")]
@@ -50,7 +50,7 @@ def tradable_now(table: pd.DataFrame) -> set[str]:
 
 
 def status(days: int = 7) -> dict[str, Any]:
-    """คลังมีอะไรแล้วบ้าง — ใช้ตอบว่า "ข้อมูลพอจะเริ่มขั้นต่อไปหรือยัง" (เช่น ข่าวครอบคลุมหุ้นกี่ตัว)"""
+    """What the store holds, to answer "is there enough data to start the next stage" (for example how many stocks the news covers)"""
     out: dict[str, Any] = {}
     snaps = sorted(config.RAW_TH_UNIVERSE.glob("*.parquet"))
     out["universe"] = {"snapshots": len(snaps), "latest": snaps[-1].stem if snaps else None,
@@ -66,11 +66,11 @@ def status(days: int = 7) -> dict[str, Any]:
     for path in sorted(config.RAW_TH_NEWS.glob("*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():
             record = json.loads(line)
-            seen.setdefault(record["url"], record)         # ข่าวเดียวกันอยู่หลายไฟล์ได้ (ดึงซ้อนกัน) — นับครั้งเดียว
+            seen.setdefault(record["url"], record)         # The same story can be in several files (overlapping fetches); count it once
     recent = [r for r in seen.values()
               if r.get("published_at") and pd.Timestamp(r["published_at"]) >= pd.Timestamp(since)]
     mentions = collections.Counter(t for r in recent for t in r["tickers"])
-    # ตัวเลขที่ตัดสินว่า scanner ไทยมีวัตถุดิบพอไหม: หุ้นที่ "ซื้อขายได้จริง" ถูกพูดถึงกี่ตัวต่อวัน
+    # The number that decides whether the Thai scanner has enough material: how many really tradable stocks are mentioned per day
     tradable = tradable_now(table)
     per_day: dict[str, set[str]] = collections.defaultdict(set)
     for r in recent:

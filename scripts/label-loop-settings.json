@@ -1,13 +1,13 @@
 {
   "_comment": [
-    "settings เฉพาะงาน label ตอนกลางคืน — ส่งเข้าไปด้วย --settings จาก label-auto.sh",
-    "แยกไฟล์ไว้ต่างหากด้วยเหตุผลสองข้อ:",
-    "1. .claude/settings.local.json ถูกระบบเขียนทับทุกครั้งที่ผู้ใช้กดอนุมัติคำสั่ง",
-    "   และการเขียนทับนั้นเคยทำ deny block หายไปทั้งก้อนมาแล้ว ไฟล์นี้ไม่ถูกแตะ",
-    "2. ข้อจำกัดในนี้ควรบังคับใช้เฉพาะตอนรันอัตโนมัติ ไม่ใช่ตอนทำงานปกติ",
+    "Settings only for the overnight labelling job; passed in with --settings from label-auto.sh",
+    "Kept in a separate file for two reasons:",
+    "1. .claude/settings.local.json is rewritten by the system every time the user approves a command,",
+    "   and one such rewrite once wiped out the whole deny block; this file is never touched",
+    "2. These restrictions should apply only to automatic runs, not to normal work",
     "",
-    "allow เป็น Write เปล่า ๆ เพราะ CLI 2.1.179 ไม่ match กฎ Write(<path>)",
-    "ขอบเขต path จึงบังคับด้วย hook แทน (ดู guard-queue-write.py)"
+    "allow is a bare Write because CLI 2.1.179 does not match Write(<path>) rules,",
+    "so the path boundary is enforced by a hook instead (see guard-queue-write.py)"
   ],
   "permissions": {
     "allow": [

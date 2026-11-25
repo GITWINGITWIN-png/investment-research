@@ -1,8 +1,8 @@
-"""บันทึกทุกการทดลอง — "ลองกี่ครั้ง" คือตัวแปรที่ Deflated Sharpe ต้องใช้
+"""Record every experiment: "how many tries" is an input the Deflated Sharpe needs.
 
-โน้ต 09: "บันทึกจำนวนการทดลองทุกครั้ง ... ย้อนกลับไปทำทีหลังไม่ได้"
-ทุกครั้งที่ประเมิน factor ผ่าน harness จะต่อท้ายไฟล์นี้อัตโนมัติ (append-only)
-พร้อม git commit ของโค้ดตอนนั้น → ย้อนดูได้ว่าผลแต่ละบรรทัดมาจากโค้ดเวอร์ชันไหน
+Note 09: "record the number of trials every time ... it cannot be reconstructed later".
+Every factor evaluation through the harness is appended to this file automatically (append-only),
+with the git commit of the code at the time, so each line can be traced to the code version it came from.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def history(family: str | None = None) -> list[dict[str, Any]]:
 
 
 def count(family: str | None = None) -> int:
-    """จำนวนการทดลองที่ **ไม่ซ้ำกัน** — รันการทดลองเดิมซ้ำ (ชื่อ+พารามิเตอร์+ช่วงเวลาเดิม)
-    ไม่ใช่การลองใหม่ จึงไม่ควรเพิ่มจำนวนครั้งที่ใช้หัก Deflated Sharpe
+    """Number of **distinct** experiments: re-running the same experiment (same name, parameters and period)
+    is not a new try, so it should not add to the count used to deflate the Sharpe.
     """
     return len({(r["family"], r["name"], r["params_hash"], tuple(r["period"])) for r in history(family)})

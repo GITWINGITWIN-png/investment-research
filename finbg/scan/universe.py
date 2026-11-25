@@ -1,7 +1,8 @@
-"""หุ้นทั้งตลาดสหรัฐจาก Nasdaq screener — 1 request ได้ทุกตัว (~7,000)
+"""The whole US stock market from the Nasdaq screener: one request returns every stock (about 7,000).
 
-snapshot นี้ **ย้อนหลังไม่ได้** (API ให้แค่ค่าล่าสุด) จึงเก็บเป็นข้อมูลดิบ PIT ทุกวัน
-universe ที่ใช้สแกน = มูลค่าตลาด ≥ $300M และมูลค่าซื้อขาย ≥ $2M/วัน (~3,100 ตัว)
+Not in the public edition: robots.txt of api.nasdaq.com does not allow bots.
+This snapshot **cannot be collected later** (the API gives only the latest values), so it was stored daily as point-in-time raw data.
+The scan universe = market cap >= $300M and traded value >= $2M a day (about 3,100 stocks).
 """
 
 from __future__ import annotations
@@ -57,13 +58,13 @@ def fetch() -> pd.DataFrame:
 
 
 def snapshot(session: str) -> tuple[pd.DataFrame, bool]:
-    """เก็บ snapshot ของวันทำการ `session` — คืน (ตาราง, เป็นข้อมูลใหม่จริงไหม)
+    """Store the snapshot for trading day `session`; returns (table, whether the data is really new).
 
-    วันหยุดตลาด API ยังคืนข้อมูลของวันทำการก่อนหน้า ถ้า % เปลี่ยนแปลงเหมือน snapshot
-    ล่าสุดเกือบทั้งหมด = ข้อมูลซ้ำ ไม่บันทึกเป็นวันใหม่ (ไม่งั้นวันหยุดจะกลายเป็นวันทำการปลอม)
+    On market holidays the API still returns the previous trading day's data; if the % changes match the latest
+    snapshot almost entirely, it is a repeat and is not saved as a new day (otherwise holidays would become fake trading days).
     """
     df = fetch()
-    # เทียบกับวันทำการ "ก่อนหน้า" เท่านั้น — รันซ้ำวันเดิม (เช่น หลัง dry-run) ต้องไม่ถูกมองว่าเป็นวันหยุด
+    # Compare only with the previous trading day; re-running the same day (e.g. after a dry run) must not look like a holiday
     earlier = [f for f in sorted(config.RAW_SCREENER.glob("*.parquet")) if f.stem[:10] < session]
     previous = pd.read_parquet(earlier[-1]) if earlier else pd.DataFrame()
     if not previous.empty:
@@ -82,7 +83,7 @@ def latest() -> pd.DataFrame:
 
 
 def tradable(df: pd.DataFrame, median_dollar_volume: pd.Series | None = None) -> pd.DataFrame:
-    """กรองเหลือหุ้นที่ซื้อขายได้จริง — ใช้มูลค่าซื้อขายมัธยฐาน 20 วันถ้ามีประวัติพอ"""
+    """Filter to really tradable stocks, using the 20-day median traded value when there is enough history"""
     dollar_today = df["close"] * df["volume"]
     dollar = dollar_today
     if median_dollar_volume is not None and not median_dollar_volume.empty:

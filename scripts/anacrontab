@@ -1,17 +1,17 @@
-# anacron ระดับผู้ใช้ (ไม่ต้องใช้ root) — รันงานที่พลาดเพราะเครื่องปิด
+# User-level anacron (no root needed): runs jobs missed while the machine was off
 #
-# ทำงานยังไง: cron เรียก anacron ทุกชั่วโมง (05:05–23:05) และตอนบูต
-# anacron ดูใน spool ว่างานแต่ละตัวรันครั้งล่าสุดเมื่อไหร่ ถ้าเกินรอบ (period) ก็รันเลย
-# → เปิดเครื่องตอนไหนของวันก็ได้ข้อมูลวันนั้น · เปิดเครื่องทั้งคืน งานจะรันตอน 05:05
+# How it works: cron calls anacron every hour (05:05 to 23:05) and at boot;
+# anacron checks in its spool when each job last ran, and runs it if its period has passed,
+# so whenever the machine is switched on that day, the day's data is collected; left on overnight, the job runs at 05:05
 #
-# anacron รุ่นนี้ (2.3 ของ Debian/Ubuntu) ไม่มี START_HOURS_RANGE
-# การไม่รันช่วง 00:00–04:59 (ตลาดสหรัฐยังเปิด) จึงคุมจาก crontab แทน
+# This anacron (2.3 on Debian/Ubuntu) has no START_HOURS_RANGE,
+# so not running between 00:00 and 04:59 (while the US market is open) is controlled from crontab instead
 SHELL=/bin/bash
 PATH=/home/you/.local/bin:/usr/local/bin:/usr/bin:/bin
 HOME=/home/you
 LANG=C.UTF-8
 MAILTO=""
 
-# period(วัน)  delay(นาที)  ชื่องาน         คำสั่ง
+# period(days)  delay(min)  job name        command
 1              2            finbg-morning   /home/you/investment-research/scripts/morning.sh
 7              20           finbg-backup    /home/you/investment-research/scripts/backup.sh

@@ -1,6 +1,6 @@
-"""การแบ่งข้อมูลสำหรับข้อมูลการเงิน — ส่วนที่ 3 ของโน้ต 09
+"""Data splits for financial data: part 3 of note 09.
 
-K-fold ธรรมดาใช้ไม่ได้: สุ่มแบ่ง = เอาอนาคตมาสอน แล้วทดสอบกับอดีต
+Plain K-fold does not work: a random split trains on the future and tests on the past.
 """
 
 from __future__ import annotations
@@ -10,10 +10,10 @@ import pandas as pd
 
 
 def walk_forward(dates: pd.DatetimeIndex, train_years: int = 3, test_months: int = 12) -> list[dict[str, pd.Timestamp]]:
-    """หน้าต่างเลื่อน: [train 3 ปี] → [test 12 เดือนถัดไป] แล้วเลื่อนไปทีละ 12 เดือน
+    """Rolling window: [train 3 years] -> [test the next 12 months], then move forward 12 months at a time.
 
-    จำลองสิ่งที่จะทำจริง (ปรับปรุงเป็นระยะ แล้วใช้กับอนาคตที่ไม่รู้) และได้ผลหลายชุด
-    → เห็นความแปรปรวนข้ามปี ไม่ใช่ตัวเลขเดียวที่อาจโชคดี
+    It mimics what would happen in practice (update periodically, then apply to an unknown future) and gives several results,
+    so the variation across years is visible instead of one number that may be lucky.
     """
     splits = []
     start = dates[0]
@@ -30,12 +30,12 @@ def walk_forward(dates: pd.DatetimeIndex, train_years: int = 3, test_months: int
 
 
 def purged_kfold(n: int, n_splits: int = 5, horizon: int = 20, embargo: int = 5) -> list[dict[str, np.ndarray]]:
-    """K ช่วงต่อเนื่อง + purge + embargo (López de Prado, AFML บทที่ 7)
+    """K contiguous folds + purge + embargo (López de Prado, AFML chapter 7).
 
-    - **purge**: ตัวอย่าง train ที่ label ใช้ผลตอบแทน `horizon` วันข้างหน้า ซึ่งยื่นเข้าไปในช่วง test
-      ต้องตัดทิ้ง ไม่งั้นโมเดล "เห็น" คำตอบของ test ผ่าน label ของ train
-    - **embargo**: เว้นช่วงหลัง test อีก `embargo` วันก่อนกลับมาใช้เป็น train
-      ตัด autocorrelation ที่ยังหลงเหลือ
+    - **purge**: training samples whose label uses returns `horizon` days ahead that reach into the test period
+      must be dropped, otherwise the model "sees" the test answers through the training labels
+    - **embargo**: leave a further `embargo` days after the test period before data is used for training again,
+      to cut remaining autocorrelation
     """
     folds = np.array_split(np.arange(n), n_splits)
     out = []
@@ -50,7 +50,7 @@ def purged_kfold(n: int, n_splits: int = 5, horizon: int = 20, embargo: int = 5)
 
 
 def walk_forward_ic(ic: pd.Series, splits: list[dict[str, pd.Timestamp]]) -> pd.DataFrame:
-    """IC เฉลี่ยของแต่ละช่วง test — factor ที่ดีต้องเป็นบวกสม่ำเสมอ ไม่ใช่ดีปีเดียว"""
+    """Mean IC of each test period; a good factor is consistently positive, not good for a single year"""
     rows = []
     for split in splits:
         window = ic.loc[split["test_start"]:split["test_end"]]

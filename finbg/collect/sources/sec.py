@@ -1,17 +1,17 @@
-"""เอกสารที่ยื่นต่อ SEC — แหล่งปฐมภูมิที่มีค่าที่สุดในทั้งระบบ
+"""Documents filed with the SEC: the most valuable primary source in the whole system.
 
-## ทำไมสำคัญกว่าข่าว
+## Why it matters more than news
 
-ข่าวคือ **การตีความ** ของนักข่าว ส่วน filing คือ **ข้อเท็จจริงที่บริษัทมีหน้าที่แจ้งตามกฎหมาย**
+News is a journalist's **interpretation**; a filing is **a fact the company must disclose by law**.
 
-โดยเฉพาะ **8-K** = "current report" ที่บริษัทต้องยื่นเมื่อเกิดเหตุการณ์สำคัญ
-(เปลี่ยนผู้บริหาร ควบรวม ผิดนัดชำระหนี้ ฯลฯ) ภายในไม่กี่วันทำการ
-→ **นิยามของ "ข่าวที่มีนัยสำคัญ" ตามกฎหมาย** ไม่ใช่ตามที่นักข่าวเลือก
+In particular the **8-K** is the "current report" a company must file within a few business days
+of a major event (management change, merger, debt default and so on),
+which makes it **the legal definition of material news**, not what a journalist chose.
 
-## ข้อกำหนดของ SEC ที่ต้องทำตาม
+## SEC requirement
 
-SEC บังคับให้ทุก request ระบุ User-Agent เป็น **"ชื่อ อีเมล"** ที่ติดต่อได้จริง
-ถ้าไม่ใส่จะโดน HTTP 403 ทันที (ทดสอบแล้ว) — ไม่ใช่มารยาท แต่เป็นเงื่อนไขการใช้งาน
+The SEC requires every request to carry a User-Agent of **"name email"** with a reachable address.
+Without it the response is HTTP 403 at once (tested); it is a condition of use, not a courtesy.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_noda
 
 
 def _headers() -> dict[str, str]:
-    """SEC ต้องการ User-Agent ที่มีอีเมลติดต่อได้ ไม่งั้น 403 (ค่ามาจาก FINBG_SEC_USER_AGENT)"""
+    """The SEC requires a User-Agent with a contact email, otherwise 403 (the value comes from FINBG_SEC_USER_AGENT)"""
     if not config.SEC_USER_AGENT:
         raise RuntimeError(
             "FINBG_SEC_USER_AGENT is not set. The SEC asks for a contact name and email in the "
@@ -44,9 +44,9 @@ def _headers() -> dict[str, str]:
 
 
 def _ticker_to_cik() -> dict[str, str]:
-    """แผนที่ ticker → CIK พร้อม cache ลงดิสก์
+    """Ticker -> CIK map, cached on disk.
 
-    รายการนี้เปลี่ยนน้อยมาก จึง cache ไว้ 30 วัน — ไม่ต้องโหลดใหม่ทุกวัน
+    The list rarely changes, so it is cached for 30 days instead of reloaded daily.
     """
     cache = config.DERIVED / "sec_ticker_cik.json"
     if cache.exists() and (time.time() - cache.stat().st_mtime) < 30 * 86400:
@@ -69,7 +69,7 @@ def _ticker_to_cik() -> dict[str, str]:
 
 
 def _field(recent: dict[str, Any], key: str, i: int) -> str:
-    """อ่านคอลัมน์ที่ i ของ submissions JSON แบบไม่พังเมื่อคอลัมน์ไม่มี/สั้นกว่า"""
+    """Read column i of the submissions JSON without failing when the column is missing or shorter"""
     column = recent.get(key) or []
     return str(column[i]) if i < len(column) and column[i] is not None else ""
 
@@ -78,16 +78,16 @@ SEVERITY_RANK = {"info": 0, "high": 1, "critical": 2}
 
 
 def item_severity(items: list[str]) -> str:
-    """ระดับความรุนแรงสูงสุดของ 8-K จากหัวข้อทั้งหมดที่ยื่นมาพร้อมกัน"""
+    """Highest severity of an 8-K across all the items filed together"""
     levels = [config.SEC_8K_ITEMS.get(code, ("", "info"))[1] for code in items]
     return max(levels, key=SEVERITY_RANK.get, default="info")
 
 
 def _title(form: str, ticker: str, description: str, items: list[str]) -> str:
-    """พาดหัวที่อ่านแล้วรู้ทันทีว่าเรื่องอะไร
+    """A headline that says at once what the filing is about.
 
-    8-K ที่มี items: "[8-K] TSLA — 2.02 ประกาศผลประกอบการ · 9.01 เอกสารแนบ"
-    ฟอร์มอื่น: "[10-Q] GE — 10-Q" (เหมือนเดิม)
+    8-K with items: "[8-K] TSLA — 2.02 Results of operations · 9.01 Exhibits"
+    Other forms: "[10-Q] GE — 10-Q" (unchanged)
     """
     if form == "8-K" and items:
         named = " · ".join(
@@ -98,10 +98,10 @@ def _title(form: str, ticker: str, description: str, items: list[str]) -> str:
 
 
 def fetch(tickers: list[str] | None = None, lookback_days: int = 7) -> list[dict[str, Any]]:
-    """ดึง filing ล่าสุดของ watchlist — เฉพาะฟอร์มที่บอกเหตุการณ์จริง
+    """Fetch the latest filings for the watchlist, only forms that report real events.
 
-    ตัด Form 3/4/5 (การซื้อขายของผู้บริหาร) ออก เพราะมีปริมาณมากและ
-    ส่วนใหญ่เป็นรายการตามแผนที่ตั้งไว้ล่วงหน้า ไม่ใช่สัญญาณ
+    Forms 3/4/5 (insider trades) are left out because they are numerous and
+    mostly pre-planned transactions, not signals.
     """
     from datetime import date, timedelta
 
@@ -131,7 +131,7 @@ def fetch(tickers: list[str] | None = None, lookback_days: int = 7) -> list[dict
         for i, form in enumerate(recent.get("form", [])):
             filing_date = recent["filingDate"][i]
             if filing_date < cutoff:
-                break                                  # เรียงใหม่→เก่า เจอเก่าแล้วหยุดได้
+                break                                  # Sorted newest to oldest, so we can stop at the first old one
             if form not in config.SEC_FORMS:
                 continue
 
@@ -150,9 +150,9 @@ def fetch(tickers: list[str] | None = None, lookback_days: int = 7) -> list[dict
                 normalize(
                     url=url,
                     title=_title(form, ticker, description, items),
-                    # เวลาที่ SEC รับเอกสารจริง (ละเอียดถึงวินาที) แม่นกว่าวันที่ยื่นมาก
-                    # เช่น งบ TSLA "ยื่น 21 ต.ค." แต่ SEC รับตอน 00:41 UTC ของวันที่ 22
-                    # (= หลังตลาดปิดวันที่ 21) — knowledge time ที่ถูกต้องคือเวลาหลัง
+                    # The time the SEC actually accepted the document (to the second) is much more precise than the filing date
+                    # For example TSLA's report was "filed 21 Oct" but the SEC accepted it at 00:41 UTC on the 22nd
+                    # (after the market closed on the 21st), so the correct knowledge time is the later one
                     published_at=accepted.replace(".000Z", "+00:00") if accepted
                     else f"{filing_date}T00:00:00+00:00",
                     source=SOURCE,
@@ -170,7 +170,7 @@ def fetch(tickers: list[str] | None = None, lookback_days: int = 7) -> list[dict
                 )
             )
 
-        # SEC ขอไม่เกิน 10 req/วินาที — เว้นไว้เผื่อ
+        # The SEC asks for at most 10 requests per second; keep a margin
         time.sleep(config.SEC_MIN_INTERVAL_SEC)
 
     return records

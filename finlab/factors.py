@@ -1,13 +1,13 @@
-"""factor อ้างอิง — ทุกตัวคืนตาราง (วันที่ × ticker) ที่ค่า ณ วัน t ใช้ข้อมูลถึงวัน t เท่านั้น
+"""Reference factors: each returns a (date x ticker) table whose value on day t uses data up to day t only.
 
-ตัวจริง (มีเหตุผลเชิงเศรษฐศาสตร์ในวรรณกรรม):
-    momentum_12_1   ผู้ชนะ 12 เดือน (ข้ามเดือนล่าสุด) มักชนะต่อ — Jegadeesh & Titman 1993
-    reversal_1m     ผู้แพ้เดือนล่าสุดมักเด้ง (ระยะสั้น) — Jegadeesh 1990
-    low_vol_60d     หุ้นผันผวนต่ำให้ผลตอบแทนต่อความเสี่ยงดีกว่า — "low-volatility anomaly"
+Real ones (with an economic rationale in the literature):
+    momentum_12_1   12-month winners (skipping the latest month) tend to keep winning; Jegadeesh & Titman 1993
+    reversal_1m     last month's losers tend to bounce (short term); Jegadeesh 1990
+    low_vol_60d     low-volatility stocks give better risk-adjusted returns; the "low-volatility anomaly"
 
-ตัวปลอม (มีไว้ทดสอบว่า harness จับได้):
-    random_noise     ไม่มีสัญญาณเลย → harness ต้องบอกว่าไร้ค่า
-    lookahead_cheat  แอบใช้ผลตอบแทนในอนาคต → harness ต้องจับได้ว่า "ดีเกินจริง"
+Fakes (to test that the harness catches them):
+    random_noise     no signal at all; the harness must call it worthless
+    lookahead_cheat  secretly uses future returns; the harness must flag it as too good to be true
 """
 
 from __future__ import annotations
@@ -35,11 +35,11 @@ def random_noise(prices: pd.DataFrame, seed: int = 0) -> pd.DataFrame:
 
 
 def lookahead_cheat(prices: pd.DataFrame, horizon: int = 5, noise: float = 3.0, seed: int = 0) -> pd.DataFrame:
-    """factor ที่ "โกง": ผลตอบแทน h วันข้างหน้า + noise ก้อนใหญ่
+    """A "cheating" factor: the return h days ahead plus a large dose of noise.
 
-    ใส่ noise เยอะโดยตั้งใจ ให้หน้าตาเหมือน factor จริงมากขึ้น (IC ไม่ถึง 1.0)
-    แต่ยังสูงเกินกว่าที่ factor จริงทำได้ — แบบเดียวกับบั๊ก look-ahead ในชีวิตจริง
-    ที่มักแอบเข้ามาทีละนิด ไม่ใช่โจ่งแจ้ง
+    The noise is heavy on purpose, so it looks more like a real factor (IC below 1.0)
+    while staying higher than any real factor can reach, like real-life look-ahead bugs,
+    which usually creep in a little at a time rather than blatantly.
     """
     future = prices.shift(-horizon) / prices - 1.0
     scale = future.stack().std()

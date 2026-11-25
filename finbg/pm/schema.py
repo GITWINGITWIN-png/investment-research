@@ -1,11 +1,11 @@
-"""รูปแบบของแผนรายสัปดาห์ — ตรวจสองชั้น
+"""Format of the weekly plan, checked in two layers.
 
-ชั้นที่ 1 `PLAN_SCHEMA` ส่งให้ CLI ผ่าน `--json-schema` → โมเดลถูกบังคับให้ตอบรูปแบบนี้
-ชั้นที่ 2 `validate()` ตรวจกติกาที่ JSON schema แสดงไม่ได้ (เพดานต่อชนิดหุ้น, turnover,
-ผลรวมน้ำหนัก, ทุกการเปลี่ยนต้องมีเหตุผล, คำทำนายต้องตัดสินได้)
+Layer 1: `PLAN_SCHEMA` goes to the CLI through `--json-schema`, so the model is forced to answer in this format.
+Layer 2: `validate()` checks rules a JSON schema cannot express (caps per asset type, turnover,
+weight sums, a reason for every change, predictions that can be resolved).
 
-ข้อผิดพลาดในชั้นที่ 2 ถูกส่งกลับให้โมเดลแก้ได้อีกครั้ง (ดู runner.py)
-ถ้ายังไม่ผ่าน → แผนสัปดาห์นั้นถูกปฏิเสธ และพอร์ตคงน้ำหนักเดิม ("ไม่เปลี่ยน" คือค่าปลอดภัย)
+Layer 2 errors go back to the model for one more try (see runner.py).
+If it still fails, that week's plan is rejected and the portfolio keeps its weights ("no change" is the safe default).
 """
 
 from __future__ import annotations
@@ -134,10 +134,10 @@ def validate(
     today: date,
     news_ids: set[str] | None = None,
 ) -> tuple[list[str], list[str], dict[str, Any]]:
-    """คืน (errors, warnings, normalized) — errors ว่างแปลว่าแผนใช้ได้
+    """Return (errors, warnings, normalized); empty errors means the plan is usable.
 
-    `previous` = น้ำหนักเป้าหมายของแผนล่าสุด (satellite, cash) ใช้ตรวจ turnover/changes
-    `closes`   = ราคาปิดล่าสุด ใช้ตรวจว่าระดับราคาใน trigger/คำทำนายสมเหตุสมผล
+    `previous` = target weights of the latest plan (satellite, cash), used to check turnover and changes
+    `closes`   = latest closes, used to check that price levels in triggers and predictions are plausible
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -173,7 +173,7 @@ def validate(
         weights = {t: w / total for t, w in weights.items()}
         cash = cash / total
 
-    # --- ปัดการเปลี่ยนแปลงเล็ก ๆ คืน (กัน churn ที่ไม่มีความหมาย) ------------------
+    # --- Round small changes back (avoids meaningless churn) ------------------
     snapped: list[str] = []
     trial = dict(weights)
     for ticker in set(prev_sat) | set(weights):
@@ -202,7 +202,7 @@ def validate(
     if len(weights) > config.PM_MAX_POSITIONS:
         errors.append(f"ถือ {len(weights)} ตัว เกินเพดาน {config.PM_MAX_POSITIONS}")
 
-    # --- changes: ทุกการเปลี่ยนที่มีนัยต้องมีเหตุผล --------------------------------
+    # --- changes: every meaningful change needs a reason --------------------------------
     declared = {str(c.get("ticker", "")).strip().upper(): c for c in output.get("changes") or []}
     for ticker in sorted(set(prev_sat) | set(weights)):
         old, new = prev_sat.get(ticker, 0.0), weights.get(ticker, 0.0)
@@ -292,7 +292,7 @@ def validate(
     if len(predictions) < config.PM_MIN_PREDICTIONS and not any("predictions" in e for e in errors):
         errors.append(f"ต้องมีคำทำนายที่ตัดสินได้อย่างน้อย {config.PM_MIN_PREDICTIONS} ข้อ")
 
-    # --- ข้อความ -------------------------------------------------------------
+    # --- Text -------------------------------------------------------------
     if len(str(output.get("thesis", "")).strip()) < 60:
         errors.append("thesis สั้นเกินไป — ต้องอธิบายมุมมองหลักของสัปดาห์ให้เข้าใจได้")
     if news_ids is not None:
@@ -314,7 +314,7 @@ def validate(
 
 
 def deadline_examples(today: date) -> dict[str, str]:
-    """ตัวอย่างวันที่สำหรับพรอมต์ — ให้โมเดลเห็นช่วงที่ยอมรับเป็นวันจริง"""
+    """Sample dates for the prompt, so the model sees the accepted range as real dates"""
     return {
         "min": (today + timedelta(days=config.PM_PREDICTION_MIN_DAYS)).isoformat(),
         "max": (today + timedelta(days=config.PM_PREDICTION_MAX_DAYS)).isoformat(),

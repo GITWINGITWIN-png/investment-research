@@ -1,7 +1,7 @@
-"""ชั้น 2 — Sonnet อ่านการ์ดของผู้เข้ารอบ 30 ตัว แล้วบอกว่าตัวไหนคุ้มให้ Opus ดำลึก
+"""Stage 2: Sonnet reads the cards of the 30 finalists and says which are worth an Opus deep dive.
 
-ใช้โมเดลที่ถูกกว่าตรงนี้เพราะงานคือ "คัดกรอง" ไม่ใช่ "ตัดสินใจ" — การ์ดสั้น อ่านเร็ว
-และกลุ่มควบคุมใน book.py จะบอกได้ว่าการคัดกรองนี้ช่วยจริงไหม (ผลของทั้ง 30 ตัวถูกเก็บ)
+A cheaper model is used here because the job is "screening", not "deciding"; the cards are short and quick to read,
+and the control group in book.py will show whether this screening really helps (the outcomes of all 30 are stored).
 """
 
 from __future__ import annotations

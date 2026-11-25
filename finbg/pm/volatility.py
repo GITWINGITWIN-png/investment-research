@@ -1,27 +1,27 @@
-"""หุ้นที่จับตาอยู่ผันผวนรุนแรง → เรียก Claude มาสืบสาเหตุ แล้วตัดสินว่าจะทำอะไรต่อ
+"""Watched stocks with violent moves: call Claude to investigate the cause, then decide what to do.
 
-รันวันละครั้งหลังเก็บข้อมูล (scripts/morning.sh) · **0 token ถ้าไม่มีอะไรผิดปกติ**
+Runs once a day after data collection (scripts/morning.sh); **0 tokens when nothing is unusual**.
 
-## ขั้นตอน
+## Steps
 
-1. **จับ (โค้ด)** — หุ้นใน watchlist + ตัวที่ satellite ถืออยู่ เข้าเกณฑ์ข้อใดข้อหนึ่ง:
-   - วันเดียวขยับ ≥ VOL_DAILY_Z เท่าของความผันผวนปกติ **และ** ≥ % ขั้นต่ำ
-   - 5 วันทำการสะสม ≥ VOL_WEEK_Z เท่า **และ** ≥ % ขั้นต่ำ (จับการไหลลงต่อเนื่องที่ไม่มีวันไหนแรงมาก)
-   - ราคาทะลุ trigger ที่แผนปัจจุบันตั้งไว้เอง
-   เกณฑ์ปรับด้วยข้อมูลจริงปี 2017–2026: ~47 เหตุการณ์/ปี ใน 24 ตัว = ~2–3 ครั้ง/เดือนที่ต้องเรียก Claude
-2. **ประกอบหลักฐาน (โค้ด)** — ราคา 10 วันพร้อม z, ปริมาณซื้อขาย, SPY/ETF หมวดวันเดียวกัน,
-   ส่วนที่อธิบายด้วยตลาดไม่ได้ (residual = ผลตอบแทน − β × SPY), ข่าว/8-K ของหุ้นนั้นช่วงเกิดเหตุ,
-   งบล่าสุด, วันประกาศงบ, และสถานะในแผนปัจจุบัน
-3. **สืบ (Claude ไม่มีเครื่องมือ ตอบ JSON)** — สาเหตุ + หลักฐาน + ความมั่นใจ + การตัดสินใจ
-4. **บันทึก + แจ้ง** — Journal/Investigations/ และแจ้งเตือนสรุปสั้น ๆ
-5. **ถ้าตัดสินว่าตัวที่ถือต้องปรับ** → เรียก PM วางแผนใหม่ (ผ่านตัวตรวจกติกาเหมือนแผนปกติ)
-   การสืบสวนแนะนำได้ แต่ **ไม่แตะพอร์ตเอง** — พอร์ตเปลี่ยนได้ทางเดียวคือผ่านแผนที่ตรวจแล้ว
+1. **Detect (code)**: watchlist stocks and satellite holdings that meet any of these:
+   - a one-day move >= VOL_DAILY_Z times normal volatility **and** >= the minimum %
+   - a 5-trading-day move >= VOL_WEEK_Z times **and** >= the minimum % (catches a steady slide with no single big day)
+   - the price crosses a trigger the current plan set itself
+   Thresholds were tuned on real data from 2017 to 2026: about 47 events a year across 24 tickers, i.e. Claude is called 2 to 3 times a month.
+2. **Assemble evidence (code)**: 10 days of prices with z, volume, SPY and the sector ETF on the same day,
+   the part the market does not explain (residual = return - beta x SPY), news and 8-Ks for the stock around the event,
+   latest financials, the earnings date, and its status in the current plan
+3. **Investigate (Claude, no tools, JSON answer)**: cause + evidence + confidence + decision
+4. **Record and notify**: Journal/Investigations/ and a short alert
+5. **If a holding needs adjusting** -> ask the PM for a new plan (through the same rule checks as a normal plan).
+   The investigation can recommend, but **never touches the portfolio itself**; the only way to change it is a checked plan.
 
-## ทำไมดาวน์โหลดราคาใหม่ตอนสืบ แทนใช้คลังเดิม
+## Why prices are downloaded fresh for an investigation
 
-คลังเก็บ snapshot ต่อวัน ส่วนที่เก่ากว่า 1 เดือนไม่ถูกปรับตามการแตกพาร์/ปันผลครั้งใหม่
-ถ้ามีหุ้นแตกพาร์ ราคาในคลังจะ "ร่วง 50%" ปลอม ๆ ที่รอยต่อ — ดึงชุดใหม่ทั้งก้อนจึงได้ราคาที่ปรับ
-สม่ำเสมอ และตรวจการแตกพาร์ได้จากคอลัมน์ Stock Splits
+The store keeps one snapshot per day, and parts older than a month are not adjusted for new splits or dividends.
+After a split the stored prices would show a fake "50% drop" at the seam; a fresh full download gives consistently
+adjusted prices, and splits can be detected from the Stock Splits column.
 """
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ SYSTEM_PROMPT = """คุณคือนักวิเคราะห์ที�
 - เขียนเป็นภาษาไทย (ชื่อเฉพาะใช้อังกฤษได้) กระชับ · `summary_for_user` ไม่เกิน 3 ประโยค สำหรับแจ้งเตือนบนหน้าจอ"""
 
 
-# --- 1. จับ --------------------------------------------------------------------
+# --- 1. Detect --------------------------------------------------------------------
 
 def _load_state() -> dict[str, Any]:
     try:
@@ -127,7 +127,7 @@ def _save_state(state: dict[str, Any]) -> None:
 
 
 def fetch_prices(tickers: list[str]) -> dict[str, pd.DataFrame]:
-    """ราคา 1 ปีชุดใหม่ (ปรับแตกพาร์/ปันผลสม่ำเสมอ) + volume + การแตกพาร์ — ตัดแท่งที่ตลาดยังไม่ปิด"""
+    """A fresh year of prices (consistently adjusted for splits and dividends) + volume + splits; bars of sessions still open are dropped"""
     from ..datasource import yf
     from .. import market
 
@@ -149,7 +149,7 @@ def fetch_prices(tickers: list[str]) -> dict[str, pd.DataFrame]:
 
 def detect(prices: dict[str, pd.DataFrame], watched: list[str], held: set[str],
            triggers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """เหตุการณ์ ณ วันทำการล่าสุดที่ปิดแล้ว — คืนรายการเรียงตามความรุนแรง"""
+    """Events as of the latest closed trading day; returns a list sorted by severity"""
     adj = prices["Adj Close"]
     events: list[dict[str, Any]] = []
     for ticker in watched:
@@ -191,7 +191,7 @@ def detect(prices: dict[str, pd.DataFrame], watched: list[str], held: set[str],
 
 
 def _filter_new(events: list[dict[str, Any]], state: dict[str, Any], sessions: pd.DatetimeIndex) -> list[dict[str, Any]]:
-    """ตัดเหตุการณ์ที่เพิ่งสืบไป (cooldown) เว้นแต่รอบนี้แรงกว่าเดิม"""
+    """Drop events investigated recently (cooldown), unless this round is stronger"""
     fresh = []
     for event in events:
         last = state["investigated"].get(event["ticker"])
@@ -203,7 +203,7 @@ def _filter_new(events: list[dict[str, Any]], state: dict[str, Any], sessions: p
     return fresh
 
 
-# --- 2. หลักฐาน ----------------------------------------------------------------
+# --- 2. Evidence ----------------------------------------------------------------
 
 def _beta(stock: pd.Series, market_returns: pd.Series) -> float:
     joined = pd.concat([stock, market_returns], axis=1).dropna().iloc[-250:-5]
@@ -245,7 +245,7 @@ def _news_for(ticker: str, since: str) -> list[dict[str, Any]]:
 
 
 def _market_news(since: str) -> list[dict[str, Any]]:
-    """ข่าวระดับตลาด (ไม่ผูกหุ้น) ที่ label ว่าแรง หรือเป็นประกาศจากธนาคารกลาง"""
+    """Market-level news (not tied to a stock) labelled as strong, or central bank releases"""
     items = []
     labels = {}
     for path in sorted((config.DATA / "labels").glob("*.jsonl"))[-7:]:
@@ -378,7 +378,7 @@ def build_request(events: list[dict[str, Any]], prices: dict[str, pd.DataFrame])
             "held": set(satellite), "plan_id": plan_id}
 
 
-# --- 3. ตรวจคำตอบ -------------------------------------------------------------
+# --- 3. Check the answer -------------------------------------------------------------
 
 def validate(output: dict[str, Any], events: list[dict[str, Any]], held: set[str]) -> list[str]:
     errors = []
@@ -397,7 +397,7 @@ def validate(output: dict[str, Any], events: list[dict[str, Any]], held: set[str
     return errors
 
 
-# --- 4. รัน ---------------------------------------------------------------------
+# --- 4. Run ---------------------------------------------------------------------
 
 def run(*, dry_run: bool = False, replan: bool = True, force_tickers: list[str] | None = None) -> dict[str, Any]:
     storage.ensure_dirs()
@@ -406,7 +406,7 @@ def run(*, dry_run: bool = False, replan: bool = True, force_tickers: list[str] 
     satellite, _, _ = plans_module.current_targets()
     record = plans_module.latest()
     triggers = (record or {}).get("targets", {}).get("triggers") or []
-    # watchlist + ตัวที่ถือ + ตัวที่แผนตั้ง trigger ไว้ (เช่น QQQ) — SPY อยู่ด้วยเพื่อจับวันที่ตลาดทั้งตลาดพัง
+    # Watchlist + holdings + tickers the plan set triggers on (e.g. QQQ); SPY is included to catch days the whole market breaks
     watched = sorted(set(force_tickers) if force_tickers
                      else {*config.WATCHLIST, *satellite, "SPY", *(t["ticker"] for t in triggers)})
     prices = fetch_prices([*watched, "SPY", *config.SECTORS])
@@ -493,8 +493,8 @@ def run(*, dry_run: bool = False, replan: bool = True, force_tickers: list[str] 
                       if str(e.get("ticker", "")).upper() in request["held"])
     from . import runner
     if replan and output.get("replan_needed") and held_action and runner.due()["due"]:
-        # วันที่แผนรายสัปดาห์จะออกอยู่แล้ว ไม่ต้องวางแผนใหม่แยก — แผนรายสัปดาห์อ่านผลสืบนี้
-        # จากหัวข้อ "การแจ้งเตือนตั้งแต่แผนก่อน" (ดู _record_alerts)
+        # On a day the weekly plan is issued anyway, no separate replan is needed; the weekly plan reads this investigation
+        # From the section "Alerts since the previous plan" (see _record_alerts)
         summary["replan"] = "ไม่แยก replan — แผนรายสัปดาห์กำลังจะออกและจะอ่านผลสืบนี้"
     elif replan and output.get("replan_needed") and held_action:
         trigger = [f"การสืบเหตุการณ์ผันผวน ({page.name}): {output.get('replan_reason', '')}"] + [
@@ -551,7 +551,7 @@ def _render(investigation: dict[str, Any]) -> Any:
 
 
 def _record_alerts(investigation: dict[str, Any]) -> None:
-    """เก็บผลสืบเป็น alert ด้วย — แผนรายสัปดาห์ถัดไปจะเห็นในหัวข้อ "การแจ้งเตือนตั้งแต่แผนก่อน" """
+    """Also store investigations as alerts, so the next weekly plan sees them under "Alerts since the previous plan"."""
     month = storage.utc_now().strftime("%Y-%m")
     with (config.ALERTS / f"alerts-{month}.jsonl").open("a", encoding="utf-8") as fh:
         for event in investigation["output"]["events"]:

@@ -1,7 +1,7 @@
-"""ตัวชี้วัดระดับ factor — ส่วนที่ 1 ของโน้ต 09 (Evaluation Playbook)
+"""Factor-level metrics: part 1 of note 09 (Evaluation Playbook).
 
-ทุกฟังก์ชันรับ factor แบบ (วันที่ × ticker) ที่ค่า ณ วัน t ใช้ข้อมูลถึง t เท่านั้น
-และผลตอบแทนข้างหน้าจาก data.forward_returns
+Every function takes a (date x ticker) factor whose value on day t uses data up to t only,
+and forward returns from data.forward_returns.
 """
 
 from __future__ import annotations
@@ -15,11 +15,11 @@ from .data import forward_returns
 
 
 def rank_ic(factor: pd.DataFrame, fwd: pd.DataFrame, min_names: int = 20, method: str = "spearman") -> pd.Series:
-    """IC รายวัน = correlation ข้ามหุ้น ระหว่างค่า factor วันนั้น กับผลตอบแทนข้างหน้า
+    """Daily IC = cross-sectional correlation between that day's factor values and forward returns.
 
-    Rank IC (Spearman) = correlation ของ "อันดับ" — ทนต่อหุ้นบางตัวที่พุ่ง 300% ซึ่งจะ
-    ลากค่า Pearson ไปทั้งก้อน · ใช้ Rank IC เป็นหลักตามโน้ต 09
-    วันที่มีหุ้นให้เทียบน้อยกว่า `min_names` ตัวถูกตัดทิ้ง (correlation จากไม่กี่ตัวคือ noise)
+    Rank IC (Spearman) = correlation of the ranks; robust to a few stocks jumping 300%, which would
+    drag the Pearson value; Rank IC is the main measure, per note 09.
+    Days with fewer than `min_names` stocks to compare are dropped (a correlation from a handful of stocks is noise).
     """
     f, r = factor.align(fwd, join="inner")
     valid = f.notna() & r.notna()
@@ -33,13 +33,13 @@ def rank_ic(factor: pd.DataFrame, fwd: pd.DataFrame, min_names: int = 20, method
 
 
 def ic_summary(ic: pd.Series, horizon: int) -> dict[str, float]:
-    """สรุป IC: ค่าเฉลี่ย, ICIR, t-stat, อัตราที่เป็นบวก
+    """IC summary: mean, ICIR, t-stat, share of positive days.
 
-    ## กับดักเรื่อง t-stat
+    ## The t-stat trap
 
-    IC ของผลตอบแทน 20 วันที่คำนวณทุกวัน **ซ้อนทับกัน 19 วัน** — วันติดกันแทบเป็นค่าเดิม
-    ถ้านับ 2,500 วันเป็น 2,500 ตัวอย่างอิสระ t-stat จะสูงเกินจริงราว √20 ≈ 4.5 เท่า
-    จึงคิด t-stat จากตัวอย่างที่ห่างกันทุก h วัน (ไม่ซ้อนกัน) เท่านั้น
+    The IC of 20-day returns computed every day **overlaps by 19 days**, so adjacent days are almost the same value.
+    Counting 2,500 days as 2,500 independent samples would inflate the t-stat by about sqrt(20) = 4.5 times,
+    so the t-stat is computed only from samples h days apart (non-overlapping).
     """
     ic = ic.dropna()
     if len(ic) < 2:
@@ -59,7 +59,7 @@ def ic_summary(ic: pd.Series, horizon: int) -> dict[str, float]:
 
 
 def decay_curve(factor: pd.DataFrame, prices: pd.DataFrame, horizons: tuple[int, ...] = (1, 5, 10, 21, 63)) -> pd.DataFrame:
-    """IC ที่หลาย horizon — สัญญาณอยู่ได้นานแค่ไหน (decay เร็ว = ต้องเทรดถี่ = ค่าธรรมเนียมกิน)"""
+    """IC at several horizons: how long the signal lasts (fast decay = frequent trading = fees eat the return)"""
     rows = []
     for horizon in horizons:
         summary = ic_summary(rank_ic(factor, forward_returns(prices, horizon)), horizon)
@@ -68,7 +68,7 @@ def decay_curve(factor: pd.DataFrame, prices: pd.DataFrame, horizons: tuple[int,
 
 
 def quantile_spread(factor: pd.DataFrame, fwd: pd.DataFrame, quantiles: int = 5) -> pd.Series:
-    """ผลตอบแทนข้างหน้าของกลุ่มบนสุด − กลุ่มล่างสุด ต่อวัน (long-short แบบหยาบ)"""
+    """Daily forward return of the top group minus the bottom group (a rough long-short)"""
     f, r = factor.align(fwd, join="inner")
     ranks = f.where(r.notna()).rank(axis=1, pct=True)
     top = r.where(ranks > 1 - 1 / quantiles).mean(axis=1)
@@ -77,7 +77,7 @@ def quantile_spread(factor: pd.DataFrame, fwd: pd.DataFrame, quantiles: int = 5)
 
 
 def top_quantile_turnover(factor: pd.DataFrame, quantiles: int = 5, step: int = 21) -> float:
-    """สัดส่วนสมาชิกกลุ่มบนสุดที่เปลี่ยนไปต่อรอบปรับพอร์ต — ตัวกำหนดต้นทุนซื้อขาย"""
+    """Share of the top group's members that change per rebalance; this drives trading costs"""
     ranks = factor.rank(axis=1, pct=True).iloc[::step]
     top = ranks > 1 - 1 / quantiles
     changed = (top & ~top.shift(fill_value=False)).sum(axis=1)
@@ -86,12 +86,12 @@ def top_quantile_turnover(factor: pd.DataFrame, quantiles: int = 5, step: int = 
 
 
 def lookahead_audit(factor: pd.DataFrame, prices: pd.DataFrame, horizon: int = 5) -> dict[str, object]:
-    """ตรวจอาการ "รู้อนาคต" สองแบบ
+    """Check for two symptoms of "knowing the future".
 
-    1. **IC สูงเกินจริง** — factor รายวันข้ามหุ้นที่ IC เฉลี่ยเกิน 0.15 แทบไม่มีอยู่จริง (โน้ต 09)
-    2. **IC หายเมื่อเลื่อนเวลา** — ถ้าใช้ค่า factor ของ h วันก่อน (ข้อมูลเก่าลงนิดเดียว)
-       factor จริงที่ช้าจะเสื่อมลงเล็กน้อย แต่ factor ที่แอบใช้อนาคตจะหายเกือบหมด
-       เพราะ "อนาคต" ของ h วันก่อน คืออดีตที่ไม่บอกอะไรเกี่ยวกับอนาคตจริง
+    1. **IC too high**: daily cross-sectional factors with a mean IC above 0.15 hardly exist (note 09)
+    2. **IC vanishes when shifted**: using the factor value from h days earlier (data only slightly older),
+       a real, slow factor degrades a little, but a factor that peeks at the future almost disappears,
+       because the "future" as of h days ago is a past that says nothing about the real future.
     """
     fwd = forward_returns(prices, horizon)
     ic_now = float(rank_ic(factor, fwd).mean())

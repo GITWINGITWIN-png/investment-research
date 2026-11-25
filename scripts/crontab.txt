@@ -1,11 +1,11 @@
-# finbg — ตารางงานอัตโนมัติ (ติดตั้งด้วย: crontab scripts/crontab.txt)
+# finbg: automatic schedule (install with: crontab scripts/crontab.txt)
 #
-# งานรายวัน/รายสัปดาห์ผ่าน anacron: รันงานที่พลาดเพราะเครื่องปิด (ดู scripts/anacrontab)
-#   เรียกทุกชั่วโมงช่วง 05:05–23:05 และตอนบูต — ไม่เรียก 00:00–04:59 เพราะตลาดสหรัฐยังเปิด
-#   anacron จำเองว่าวันนี้รันแล้วหรือยัง จึงเรียกบ่อยได้โดยไม่รันซ้ำ
+# Daily and weekly jobs go through anacron, which runs jobs missed while the machine was off (see scripts/anacrontab)
+#   called every hour from 05:05 to 23:05 and at boot; not between 00:00 and 04:59, while the US market is open
+#   anacron remembers whether today's run happened, so frequent calls never run a job twice
 5 5-23 * * * /usr/sbin/anacron -s -t /home/you/investment-research/scripts/anacrontab -S /home/you/.local/state/finbg/anacron
 @reboot sleep 120; [ "$(date +\%H)" -ge 5 ] && /usr/sbin/anacron -s -t /home/you/investment-research/scripts/anacrontab -S /home/you/.local/state/finbg/anacron
 
-# ไม่มีงานรายชั่วโมงแล้ว (ผู้ใช้ขอ 2026-10-24) — การเฝ้าระวังอยู่ใน morning.sh:
-#   ทุกวัน   finbg volatility        หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ
-#   รายสัปดาห์ finbg watch --weekly   สรุป 8-K/ข่าวแรง/VIX ก่อนออกแผน
+# There are no hourly jobs any more (the owner's request, 2026-10-24); the watching lives in morning.sh:
+#   daily    finbg volatility        violent moves in watched stocks -> Claude investigates the cause
+#   weekly   finbg watch --weekly    summary of 8-Ks, strong news and VIX before the plan

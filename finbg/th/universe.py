@@ -1,21 +1,21 @@
-"""รายชื่อหุ้นไทย — snapshot ทุกวันจาก screener ของ Yahoo
+"""Thai stock list: a daily snapshot from Yahoo's screener.
 
-## ทำไมต้องเก็บทุกวัน ทั้งที่รายชื่อแทบไม่เปลี่ยน
+## Why store it daily when the list barely changes
 
-แหล่งฟรีทุกแหล่งรู้แค่ "หุ้นที่ยังจดทะเบียนวันนี้" — หุ้นที่ถูกเพิกถอนหายไปพร้อมประวัติราคา
-ผลทดสอบย้อนหลังของตลาดไทยจึงเป็นขอบบนเสมอ (survivorship) และหนักกว่า US เพราะหุ้นเล็กถูกถอดบ่อย
-การเก็บรายชื่อ + ราคาทุกวันแก้ปัญหานี้ได้ **นับจากวันนี้ไป** — ย้อนหลังแก้ไม่ได้ จึงต้องเริ่มเร็ว
+Every free source knows only "stocks listed today"; delisted stocks disappear together with their price history,
+so Thai-market backtests are always an upper bound (survivorship), and worse than in the US because small stocks are delisted often.
+Storing the list and prices daily fixes this **from today on**; the past cannot be fixed, so it has to start early.
 
-## ทำไมไม่ใช้รายชื่อจาก set.or.th
+## Why not the list from set.or.th
 
-ไฟล์รายชื่อบริษัทของ SET อยู่ใต้ /dat/ ซึ่ง robots.txt ของ SET ห้ามโปรแกรมเข้า
+SET's company list files sit under /dat/, which SET's robots.txt closes to programs.
 
-## คัด "หุ้นสามัญของบริษัทไทย" ออกจาก 2,300+ หลักทรัพย์
+## Picking "common shares of Thai companies" out of 2,300+ securities
 
-screener คืนทุกอย่างที่ซื้อขายใน SET: NVDR (-R), กระดานต่างประเทศ (-F), หุ้นบุริมสิทธิ (-P),
-warrant (-W), DR ของหุ้นต่างประเทศ (เช่น NVDA80 = NVIDIA) และกองทรัสต์/REIT
-กฎที่ใช้: ชื่อเต็มต้องเป็น "Public Company Limited" (บริษัทมหาชนไทย) และไม่ใช่กองทุน
-— DR ใช้ชื่อบริษัทต่างประเทศ จึงหลุดไปเองโดยไม่ต้องเดาจากตัวเลขท้ายชื่อ
+The screener returns everything traded on SET: NVDRs (-R), the foreign board (-F), preferred shares (-P),
+warrants (-W), DRs of foreign stocks (such as NVDA80 = NVIDIA) and trusts/REITs.
+The rule used: the full name must be "Public Company Limited" (a Thai public company) and not a fund;
+DRs carry the foreign company's name, so they drop out without guessing from the digits in the symbol.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ _FUND = re.compile(r"\bfund\b|reit|real estate investment trust|leasehold|infras
 
 
 def fetch_quotes() -> list[dict[str, Any]]:
-    """ทุกหลักทรัพย์ที่ Yahoo ระบุว่าซื้อขายใน SET (รวม mai) — ทีละ 250 ตามที่ screener ยอม"""
+    """Every security Yahoo lists as traded on SET (including mai), 250 at a time as the screener allows"""
     from ..datasource import yf
     from ..datasource import EquityQuery
     query = EquityQuery("eq", ["exchange", "SET"])
@@ -60,9 +60,9 @@ def is_common_stock(quote: dict[str, Any]) -> bool:
 
 
 def snapshot() -> dict[str, Any]:
-    """เก็บ response ของ screener ทั้งก้อน (ทุกหลักทรัพย์ ไม่ใช่แค่หุ้นสามัญ) เป็น 1 ไฟล์ต่อวัน
+    """Store the whole screener response (every security, not only common shares) as one file per day.
 
-    เก็บทุกฟิลด์ตามที่ได้มา — ฟิลด์ที่เป็น list/dict แปลงเป็นข้อความ JSON เพื่อให้ลง parquet ได้
+    Every field is kept as received; list and dict fields are converted to JSON text so they fit in parquet.
     """
     quotes = fetch_quotes()
     if not quotes:
@@ -80,7 +80,7 @@ def snapshot() -> dict[str, Any]:
 
 
 def latest() -> pd.DataFrame:
-    """หุ้นสามัญไทยจาก snapshot ล่าสุด (symbol, ชื่อ, มูลค่าตลาดเป็นบาท)"""
+    """Thai common shares from the latest snapshot (symbol, name, market cap in baht)"""
     files = sorted(config.RAW_TH_UNIVERSE.glob("*.parquet"))
     if not files:
         return pd.DataFrame(columns=["symbol", "name", "market_cap"])
@@ -91,7 +91,7 @@ def latest() -> pd.DataFrame:
 
 
 def ever_listed() -> list[str]:
-    """ทุกหุ้นสามัญที่เคยอยู่ใน snapshot ใดก็ตาม — ใช้ดึงราคาต่อให้ตัวที่ถูกถอดไปแล้วด้วย"""
+    """Every common share that appeared in any snapshot, used to keep fetching prices for stocks already delisted"""
     symbols: set[str] = set()
     for path in sorted(config.RAW_TH_UNIVERSE.glob("*.parquet")):
         df = pd.read_parquet(path, columns=["symbol", "is_common_stock"])

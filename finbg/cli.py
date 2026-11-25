@@ -1,12 +1,12 @@
-"""จุดเข้าใช้งานทั้งหมดของ background track
+"""Entry point for every background-track command.
 
-ออกแบบให้ทุกคำสั่ง **รันซ้ำได้อย่างปลอดภัย** (idempotent) เพราะ cron อาจรันซ้ำ
-หรือเราอาจรันเองระหว่างวัน — ไม่ควรมีคำสั่งไหนที่รันสองครั้งแล้วข้อมูลเพี้ยน
+Every command is designed to be **safe to re-run** (idempotent), because cron may run it again
+or we may run it by hand during the day; no command should corrupt data when run twice.
 
-    uv run finbg daily      # ← cron เรียกอันนี้ทุกวัน
-    uv run finbg brief      # สร้าง situation brief
-    uv run finbg predict "หัวข้อ"
-    uv run finbg hypo "หัวข้อ"
+    uv run finbg daily      # cron calls this every day
+    uv run finbg brief      # build the situation brief
+    uv run finbg predict "topic"
+    uv run finbg hypo "topic"
     uv run finbg status
 """
 
@@ -38,7 +38,7 @@ from .collect import prices as prices_module
 
 
 def _print_result(label: str, result: dict[str, Any]) -> bool:
-    """แสดงผลแบบสั้น ๆ และคืนว่าสำเร็จหรือไม่ (ใช้กำหนด exit code)"""
+    """Print a short result and return whether it succeeded (used for the exit code)"""
     if result.get("ok"):
         details = " · ".join(
             f"{k}={v}" for k, v in result.items()
@@ -114,7 +114,7 @@ def cmd_hypo(args: argparse.Namespace) -> int:
 
 
 def cmd_status(_: argparse.Namespace) -> int:
-    """ภาพรวมว่าคลังข้อมูลโตแค่ไหนแล้ว — ใช้ดูว่า cron ทำงานปกติไหม"""
+    """How big the data store has grown; used to check that cron is running normally"""
     storage.ensure_dirs()
 
     price_files = sorted(config.RAW_PRICES.glob("*.parquet"))
@@ -146,7 +146,7 @@ def cmd_status(_: argparse.Namespace) -> int:
 
 
 def cmd_queue(args: argparse.Namespace) -> int:
-    """แสดงว่า token ที่เหลือควรไปลงตรงไหน เรียงตามความสำคัญ"""
+    """Show where the remaining tokens should go, in order of importance"""
     items = workqueue.build()
     if not items:
         print("✅ ไม่มีงานค้าง — คิวว่าง")
@@ -237,7 +237,7 @@ def cmd_label(args: argparse.Namespace) -> int:
     if not stats["total"]:
         return 0
 
-    # provenance ขึ้นก่อน — ถ้าคลังปนโมเดล ตัวเลขอื่นทั้งหมดตีความยากขึ้นทันที
+    # Provenance first: if the corpus mixes models, every other number becomes harder to interpret
     print()
     print("   ── ที่มา (provenance) ──")
     for model, count in stats["by_model"].items():
@@ -263,7 +263,7 @@ def cmd_label(args: argparse.Namespace) -> int:
 
 
 def _pm_ledger_summary() -> dict[str, Any]:
-    """พอร์ต PM คำนวณใหม่ทุกวัน — คืนเฉพาะตัวเลขหลักให้ log อ่านง่าย"""
+    """The PM portfolio is recomputed every day; return only the main numbers so the log stays readable"""
     status = pm_portfolio.build()
     if not status.get("ok"):
         return status
@@ -279,7 +279,7 @@ def _pm_ledger_summary() -> dict[str, Any]:
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
-    """แผนรายสัปดาห์ของ Portfolio Manager (ดูโน้ต 11)"""
+    """Weekly plan of the Portfolio Manager (see note 11)"""
     if args.action == "status":
         state = pm_runner.due()
         current = plans_module.latest()
@@ -330,7 +330,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def cmd_volatility(args: argparse.Namespace) -> int:
-    """หุ้นที่จับตาผันผวนรุนแรง → Claude สืบสาเหตุ + ตัดสินใจ (morning.sh เรียกทุกวัน)"""
+    """Watched stocks with violent moves: the LLM investigates the cause and decides (morning.sh calls this daily)"""
     tickers = [t.strip().upper() for t in args.ticker.split(",")] if args.ticker else None
     result = pm_volatility.run(dry_run=args.dry_run, replan=not args.no_replan, force_tickers=tickers)
     stamp = storage.utc_now().astimezone(config.LOCAL_TZ).strftime("%Y-%m-%d %H:%M")
@@ -353,7 +353,7 @@ def cmd_volatility(args: argparse.Namespace) -> int:
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
-    """สแกนทั้งตลาดหาโอกาสที่คนมองข้าม (morning.sh เรียกทุกวัน — ข้ามเองถ้าสแกนวันนั้นแล้ว)"""
+    """Scan the whole market for overlooked opportunities (morning.sh calls this daily; skipped if already scanned that day)"""
     result = scan_runner.run(dry_run=args.dry_run, no_llm=args.no_llm, force=args.force)
     if result.get("skipped"):
         print(f"⏭️  {result['skipped']}")
@@ -380,7 +380,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def cmd_ideas(args: argparse.Namespace) -> int:
-    """ผลของพอร์ตไอเดียเทียบกลุ่มควบคุม"""
+    """Results of the idea portfolio against the control group"""
     if args.action == "resolve":
         print(scan_book.resolve())
     board = scan_book.scoreboard()
@@ -397,7 +397,7 @@ def cmd_ideas(args: argparse.Namespace) -> int:
 
 
 def cmd_th(args: argparse.Namespace) -> int:
-    """แทร็กไทย: เก็บข้อมูล (collect) · สแกนหาโอกาส (scan) · ผลพอร์ตไอเดีย (ideas) · คลังมีอะไร (status)"""
+    """Thai track: collect data (collect), scan for opportunities (scan), idea portfolio results (ideas), what the store holds (status)"""
     if args.action == "scan":
         r = th_scan.run(dry_run=args.dry_run, no_llm=args.no_llm, force=args.force)
         if r.get("skipped"):
@@ -452,7 +452,7 @@ def cmd_th(args: argparse.Namespace) -> int:
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
-    """เฝ้าระวังหนึ่งรอบ — ปกติรันสัปดาห์ละครั้งก่อนออกแผน (--weekly)"""
+    """One watch round; normally run once a week before issuing the plan (--weekly)"""
     if args.weekly:
         is_due, reason = pm_watch.weekly_due()
         if not is_due:
@@ -489,9 +489,9 @@ def cmd_notify(args: argparse.Namespace) -> int:
 
 
 def _fundamentals_if_due() -> dict[str, Any]:
-    """งบเปลี่ยนรายไตรมาส — ดึงใหม่เฉพาะเมื่อเก่าเกินกำหนดหรือมี 10-Q/10-K ใหม่
+    """Financials change quarterly, so refetch only when they are stale or a new 10-Q/10-K exists.
 
-    แต่ละรอบโหลด JSON จาก SEC รวม ~100 MB จึงไม่ควรทำทุกวันโดยไม่มีเหตุ
+    Each round downloads about 100 MB of JSON from SEC, so it should not run every day without a reason.
     """
     is_due, reason = fundamentals_module.due()
     if not is_due:
@@ -501,18 +501,18 @@ def _fundamentals_if_due() -> dict[str, Any]:
 
 
 def cmd_daily(args: argparse.Namespace) -> int:
-    """งานประจำวันที่ cron เรียก — เก็บข้อมูล คำนวณ ledger สร้าง brief
+    """Daily job called by cron: collect data, compute the ledger, build the brief.
 
-    ตั้งใจให้ **ไม่ล้มทั้งกระบวนการ** ถ้าขั้นตอนใดขั้นตอนหนึ่งพัง
-    เพราะข่าวดึงไม่ได้ ไม่ควรทำให้ราคาที่ดึงมาแล้วสูญเปล่า
+    It is meant **not to abort the whole run** when one step fails,
+    because failing to fetch news should not waste prices that were already fetched.
     """
     print(f"🔄 งานประจำวัน — {storage.utc_stamp()}")
     failures: list[str] = []
     warnings: list[str] = []
 
-    # `required=False` = ขาดได้ ไม่ทำให้ทั้ง job ถือว่าล้มเหลว
-    # ข่าวถูกจัดเป็นไม่บังคับเพราะ GDELT rate limit อยู่นอกการควบคุมเรา
-    # และการพลาดไป 1 วันเสียหายน้อยกว่าการให้ cron ส่งอีเมลเตือนทุกวันจนเราชิน
+    # `required=False` means the step may fail without failing the whole job
+    # News is optional because the GDELT rate limit is outside our control,
+    # and missing one day does less harm than a cron job that emails a warning every day until we stop noticing
     steps: list[tuple[str, Any, bool]] = [
         ("prices", lambda: prices_module.collect(), True),
         ("calendar", lambda: calendar_module.collect(), False),
@@ -563,96 +563,96 @@ def cmd_daily(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="finbg",
-        description="Background track — เก็บข้อมูลและสรุปสถานการณ์แบบอัตโนมัติ",
+        description="Background track: collects data and summarises the market situation automatically",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_prices = sub.add_parser("prices", help="ดึงราคา")
-    p_prices.add_argument("--period", default=None, help="เช่น 1mo, 1y, 10y (ปล่อยว่าง = อัตโนมัติ)")
+    p_prices = sub.add_parser("prices", help="Fetch prices")
+    p_prices.add_argument("--period", default=None, help="e.g. 1mo, 1y, 10y (empty = automatic)")
     p_prices.set_defaults(func=cmd_prices)
 
-    p_news = sub.add_parser("news", help="ดึงข่าวจากหลายแหล่ง")
+    p_news = sub.add_parser("news", help="Fetch news from several sources")
     p_news.add_argument("--sources", default=None,
-                        help="คั่นด้วยจุลภาค เช่น yahoo,rss,sec (ปล่อยว่าง = ทุกแหล่ง)")
+                        help="comma-separated, e.g. rss,sec (empty = all sources)")
     p_news.set_defaults(func=cmd_news)
 
-    sub.add_parser("ledger", help="คำนวณ paper ledger").set_defaults(func=cmd_ledger)
-    sub.add_parser("brief", help="สร้าง situation brief").set_defaults(func=cmd_brief)
-    sub.add_parser("status", help="ดูสถานะคลังข้อมูล").set_defaults(func=cmd_status)
+    sub.add_parser("ledger", help="Compute the paper ledger").set_defaults(func=cmd_ledger)
+    sub.add_parser("brief", help="Build the situation brief").set_defaults(func=cmd_brief)
+    sub.add_parser("status", help="Show the state of the data store").set_defaults(func=cmd_status)
 
-    p_predict = sub.add_parser("predict", help="สร้างคำทำนายใหม่")
+    p_predict = sub.add_parser("predict", help="Create a new prediction")
     p_predict.add_argument("title")
-    p_predict.add_argument("--horizon", type=int, default=90, help="กี่วันจึงครบกำหนด")
-    p_predict.add_argument("--confidence", type=int, default=50, help="ความมั่นใจ 0-100")
+    p_predict.add_argument("--horizon", type=int, default=90, help="days until it is due")
+    p_predict.add_argument("--confidence", type=int, default=50, help="confidence 0-100")
     p_predict.set_defaults(func=cmd_predict)
 
-    p_hypo = sub.add_parser("hypo", help="สร้าง hypothesis card")
+    p_hypo = sub.add_parser("hypo", help="Create a hypothesis card")
     p_hypo.add_argument("title")
     p_hypo.add_argument("--cost", default="medium", choices=["low", "medium", "high"])
     p_hypo.set_defaults(func=cmd_hypo)
 
-    p_queue = sub.add_parser("queue", help="ดูว่า token ที่เหลือควรใช้ทำอะไร")
-    p_queue.add_argument("--all", action="store_true", help="แสดงทั้งหมด")
+    p_queue = sub.add_parser("queue", help="Show what the remaining tokens should be spent on")
+    p_queue.add_argument("--all", action="store_true", help="show everything")
     p_queue.add_argument("--limit", type=int, default=6)
-    p_queue.add_argument("--export", action="store_true", help="เขียนคิวเป็น JSON ให้ Claude อ่าน")
+    p_queue.add_argument("--export", action="store_true", help="write the queue as JSON for the LLM to read")
     p_queue.set_defaults(func=cmd_queue)
 
-    p_label = sub.add_parser("label", help="จัดการ labeled corpus")
+    p_label = sub.add_parser("label", help="Manage the labeled corpus")
     p_label.add_argument("action", nargs="?", default="stats",
                          choices=["prepare", "ingest", "stats", "backfill"])
     p_label.add_argument("--dry-run", action="store_true",
-                         help="backfill: ดูว่าจะเติมกี่รายการ โดยยังไม่เขียนไฟล์")
+                         help="backfill: show how many items would be filled in, without writing files")
     p_label.add_argument("--batch-size", type=int, default=40)
     p_label.add_argument("--all", action="store_true",
-                         help="ไม่กรอง — รวมข่าวสัญญาณต่ำด้วย (ปกติกรองเฉพาะ primary/ยืนยัน ticker)")
-    p_label.add_argument("--file", default=None, help="ไฟล์คำตอบ (ปล่อยว่าง = ล่าสุด)")
+                         help="no filter: include low-signal news too (normally only primary sources or confirmed tickers)")
+    p_label.add_argument("--file", default=None, help="answer file (empty = latest)")
     p_label.set_defaults(func=cmd_label)
 
-    p_plan = sub.add_parser("plan", help="แผนรายสัปดาห์ของ Portfolio Manager")
+    p_plan = sub.add_parser("plan", help="Weekly plan of the Portfolio Manager")
     p_plan.add_argument("action", nargs="?", default="status",
                         choices=["status", "run", "replan", "ledger", "resolve"])
-    p_plan.add_argument("--force", action="store_true", help="ออกแผนแม้ยังไม่ถึงเวลา/ชนเพดาน")
-    p_plan.add_argument("--dry-run", action="store_true", help="สร้างพรอมต์อย่างเดียว ไม่เรียกโมเดล")
-    p_plan.add_argument("--reason", default=None, help="replan: เหตุผลที่วางแผนใหม่")
+    p_plan.add_argument("--force", action="store_true", help="issue a plan even if it is not due yet or the cap is reached")
+    p_plan.add_argument("--dry-run", action="store_true", help="build the prompt only, do not call the model")
+    p_plan.add_argument("--reason", default=None, help="replan: the reason for replanning")
     p_plan.set_defaults(func=cmd_plan)
 
-    p_watch = sub.add_parser("watch", help="สรุป 8-K/ข่าวแรง/VIX (ปกติสัปดาห์ละครั้ง)")
-    p_watch.add_argument("--dry-run", action="store_true", help="ตรวจอย่างเดียว ไม่แจ้ง ไม่บันทึก")
-    p_watch.add_argument("--no-replan", action="store_true", help="แจ้งเตือนอย่างเดียว ไม่เรียก LLM วางแผนใหม่")
-    p_watch.add_argument("--weekly", action="store_true", help="รันเฉพาะเมื่อถึงรอบสัปดาห์ (ใช้ใน morning.sh)")
+    p_watch = sub.add_parser("watch", help="summarise 8-Ks, strong news and VIX (normally once a week)")
+    p_watch.add_argument("--dry-run", action="store_true", help="check only: no alerts, nothing saved")
+    p_watch.add_argument("--no-replan", action="store_true", help="alert only: do not ask the LLM to replan")
+    p_watch.add_argument("--weekly", action="store_true", help="run only when the weekly round is due (used in morning.sh)")
     p_watch.set_defaults(func=cmd_watch)
 
-    p_scan = sub.add_parser("scan", help="สแกนทั้งตลาดหาโอกาสที่คนมองข้าม (ทุกวัน)")
-    p_scan.add_argument("--dry-run", action="store_true", help="เก็บข้อมูล+ให้คะแนน แต่ไม่เรียกโมเดล ไม่บันทึกพอร์ต")
-    p_scan.add_argument("--no-llm", action="store_true", help="บันทึกผู้เข้ารอบ แต่ไม่เรียกโมเดล")
-    p_scan.add_argument("--force", action="store_true", help="สแกนซ้ำแม้สแกนวันนั้นไปแล้ว")
+    p_scan = sub.add_parser("scan", help="Scan the whole market for overlooked opportunities (daily)")
+    p_scan.add_argument("--dry-run", action="store_true", help="collect data and score, but do not call the model or save the portfolio")
+    p_scan.add_argument("--no-llm", action="store_true", help="save the finalists, but do not call the model")
+    p_scan.add_argument("--force", action="store_true", help="scan again even if already scanned today")
     p_scan.set_defaults(func=cmd_scan)
 
-    p_ideas = sub.add_parser("ideas", help="ผลของพอร์ตไอเดียเทียบกลุ่มควบคุม")
+    p_ideas = sub.add_parser("ideas", help="Results of the idea portfolio against the control group")
     p_ideas.add_argument("action", nargs="?", default="status", choices=["status", "resolve"])
     p_ideas.set_defaults(func=cmd_ideas)
 
-    p_th = sub.add_parser("th", help="แทร็กไทย: collect (0 token) · scan · ideas · status — โน้ต 13")
+    p_th = sub.add_parser("th", help="Thai track: collect (0 tokens), scan, ideas, status; see note 13")
     p_th.add_argument("action", nargs="?", default="collect", choices=["collect", "scan", "ideas", "status"])
     p_th.add_argument("--news-hours", type=int, default=None,
-                      help="ย้อนข่าวนานกว่าปกติ (ใช้ครั้งเดียวตอนเริ่ม เช่น 168 = 7 วัน)")
-    p_th.add_argument("--dry-run", action="store_true", help="scan: ดูผู้เข้ารอบ ไม่เรียกโมเดล ไม่บันทึก")
-    p_th.add_argument("--no-llm", action="store_true", help="scan: บันทึกผู้เข้ารอบโดยไม่เรียกโมเดล")
-    p_th.add_argument("--force", action="store_true", help="scan: สแกนซ้ำแม้วันทำการนี้สแกนแล้ว")
+                      help="look further back for news than usual (once, at the start; e.g. 168 = 7 days)")
+    p_th.add_argument("--dry-run", action="store_true", help="scan: show the finalists without calling the model or saving")
+    p_th.add_argument("--no-llm", action="store_true", help="scan: save the finalists without calling the model")
+    p_th.add_argument("--force", action="store_true", help="scan: scan again even if this trading day was already scanned")
     p_th.set_defaults(func=cmd_th)
 
-    p_vol = sub.add_parser("volatility", help="หุ้นผันผวนรุนแรง → Claude สืบสาเหตุ (ทุกวัน)")
-    p_vol.add_argument("--dry-run", action="store_true", help="ดูว่าตัวไหนเข้าเกณฑ์ โดยไม่เรียก Claude")
-    p_vol.add_argument("--no-replan", action="store_true", help="สืบอย่างเดียว ไม่เรียก PM วางแผนใหม่")
-    p_vol.add_argument("--ticker", default=None, help="สั่งสืบเองเฉพาะตัว เช่น GE,META (ไม่สนเกณฑ์)")
+    p_vol = sub.add_parser("volatility", help="Watched stocks with violent moves: the LLM investigates the cause (daily)")
+    p_vol.add_argument("--dry-run", action="store_true", help="show which stocks qualify, without calling the LLM")
+    p_vol.add_argument("--no-replan", action="store_true", help="investigate only, do not ask the PM to replan")
+    p_vol.add_argument("--ticker", default=None, help="investigate these tickers regardless of the thresholds, e.g. GE,META")
     p_vol.set_defaults(func=cmd_volatility)
 
-    p_notify = sub.add_parser("notify", help="ตั้งค่า/ทดสอบการแจ้งเตือน")
+    p_notify = sub.add_parser("notify", help="Configure or test notifications")
     p_notify.add_argument("action", nargs="?", default="test", choices=["test", "setup"])
     p_notify.set_defaults(func=cmd_notify)
 
-    p_daily = sub.add_parser("daily", help="งานประจำวัน (สำหรับ cron)")
-    p_daily.add_argument("--skip-news", action="store_true", help="ข้ามข่าว (เร็วขึ้นมาก)")
+    p_daily = sub.add_parser("daily", help="Daily job (for cron)")
+    p_daily.add_argument("--skip-news", action="store_true", help="skip news (much faster)")
     p_daily.set_defaults(func=cmd_daily)
 
     args = parser.parse_args(argv)

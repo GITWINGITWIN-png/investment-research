@@ -1,9 +1,9 @@
-"""ประวัติราคาของ universe กว้าง — ใช้คิด "ความผันผวนปกติ" และ "ปริมาณซื้อขายปกติ"
+"""Price history for the broad universe, used for "normal volatility" and "normal volume".
 
-ที่มา: ดึงย้อนหลังครั้งแรกด้วย yfinance (~9 เดือน) แล้วต่อด้วย snapshot ของ screener ทุกวัน
-ผลตอบแทนรายวันใช้ % เปลี่ยนแปลงที่ Nasdaq คำนวณมา (ปรับการแตกพาร์แล้ว) ไม่ใช่ราคาปิดหารกันเอง
+Source: an initial backfill with yfinance (about 9 months), then daily screener snapshots.
+Daily returns use the % change Nasdaq computes (already split-adjusted), not closes divided by hand.
 
-เก็บที่ data/research/ (ไม่ใช่ raw) เพราะสร้างใหม่ได้จาก raw/screener + yfinance เสมอ
+Stored in data/research/ (not raw) because it can always be rebuilt from raw/screener + yfinance.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _save(df: pd.DataFrame) -> None:
 
 
 def _download(batch: list[str], period: str) -> tuple[pd.DataFrame, list[str]]:
-    """ดึงหนึ่งก้อน คืน (ตารางยาว, ticker ที่ไม่ได้ข้อมูล)"""
+    """Fetch one chunk; returns (long table, tickers with no data)"""
     from ..datasource import yf
     raw = yf.download(batch, period=period, auto_adjust=True, progress=False, threads=True)
     if raw.empty:
@@ -50,14 +50,14 @@ def _download(batch: list[str], period: str) -> tuple[pd.DataFrame, list[str]]:
 
 
 def update_recent(tickers: list[str], period: str = "10d", chunk: int = 150) -> dict[str, Any]:
-    """ราคา/ปริมาณล่าสุดของทั้ง universe จาก yfinance — แหล่งราคาหลักของการสแกน
+    """Latest price and volume for the whole universe from yfinance: the scan's main price source.
 
-    เดิมใช้ราคาจาก Nasdaq screener แต่พบ (2026-10-25) ว่า screener คืนข้อมูลของวันพฤหัสทั้งที่
-    วันศุกร์ปิดไปแล้ว — Claude สังเกตเห็นเองว่าแถววันศุกร์ซ้ำกับวันพฤหัสทุกตัว
-    screener จึงเหลือหน้าที่ให้รายชื่อหุ้น มูลค่าตลาด และหมวดเท่านั้น
+    Prices used to come from the Nasdaq screener, but it turned out (2026-10-25) that the screener returned Thursday's data after
+    Friday had closed; Claude noticed itself that every Friday row duplicated Thursday's.
+    So the screener only supplies the stock list, market caps and sectors.
 
-    ยิงทีละก้อนเล็ก เว้นจังหวะ และลองใหม่ให้ตัวที่ถูกปฏิเสธ (Yahoo จำกัดความถี่ — ยิงทีเดียว
-    7,000 ตัวเคยโดนปฏิเสธ ~900 ตัว แล้วตัวเหล่านั้นค้างเป็นข้อมูลเก่า)
+    Requests go in small chunks with pauses, and rejected tickers are retried (Yahoo limits frequency: one request for
+    7,000 tickers once had about 900 rejected, which were then stuck with stale data).
     """
     from .. import market
 
@@ -90,7 +90,7 @@ def update_recent(tickers: list[str], period: str = "10d", chunk: int = 150) -> 
 
 
 def backfill(tickers: list[str], period: str = "9mo", chunk: int = 150) -> dict[str, int]:
-    """ดึงประวัติให้ ticker ที่ยังมีน้อยกว่า 60 วัน — ทีละก้อน เว้นจังหวะกัน rate limit"""
+    """Backfill history for tickers with fewer than 60 days, chunk by chunk with pauses to respect the rate limit"""
     from ..datasource import yf
     panel = load()
     counts = panel.groupby("ticker").size() if not panel.empty else pd.Series(dtype=int)
@@ -119,7 +119,7 @@ def backfill(tickers: list[str], period: str = "9mo", chunk: int = 150) -> dict[
 
 
 def baselines(session: str) -> pd.DataFrame:
-    """ต่อ ticker: ผลตอบแทนวันนั้น, z, 5 วัน, z 5 วัน, ปริมาณเทียบมัธยฐาน 20 วัน, มูลค่าซื้อขายมัธยฐาน"""
+    """Per ticker: that day's return, z, 5-day return, 5-day z, volume against the 20-day median, median traded value"""
     panel = load()
     if panel.empty:
         return pd.DataFrame()

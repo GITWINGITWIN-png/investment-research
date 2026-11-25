@@ -1,8 +1,8 @@
-"""กรอบการลงทุน (mandate) — แปลงค่าใน config เป็นคำถามที่โค้ดส่วนอื่นถามได้ตรง ๆ
+"""Investment mandate: turns config values into questions other code can ask directly.
 
-พอร์ตทั้งหมด = core 70% (กฎตายตัว SPY 60 / AGG 40) + satellite 30% (PM เลือก)
-น้ำหนักในแผนเขียนเป็น "สัดส่วนของ satellite" (รวมกับเงินสดแล้ว = 1)
-เพื่อให้ PM คิดในกรอบที่ตัวเองคุมได้จริง แล้วโค้ดค่อยแปลงเป็นน้ำหนักทั้งพอร์ต
+Whole portfolio = core 70% (fixed rule SPY 60 / AGG 40) + satellite 30% (chosen by the PM).
+Plan weights are written as "shares of the satellite" (summing to 1 with cash)
+so the PM thinks within the part it really controls; code converts them to whole-portfolio weights.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ CASH = "CASH"
 
 
 def kind_of(ticker: str) -> str:
-    """broad = ETF ดัชนี/พันธบัตร/ทอง · sector = ETF รายหมวด · stock = หุ้นรายตัว"""
+    """broad = index, bond and gold ETFs; sector = sector ETFs; stock = single stocks"""
     if ticker in config.PM_BROAD_ETFS:
         return "broad"
     if ticker in config.SECTORS:
@@ -34,12 +34,12 @@ def in_universe(ticker: str) -> bool:
 
 
 def passive_satellite() -> tuple[dict[str, float], float]:
-    """satellite ของ control — และเป็นจุดตั้งต้นของ PM ก่อนแผนแรก"""
+    """The control's satellite, which is also the PM's starting point before its first plan"""
     return dict(config.PM_PASSIVE_SATELLITE), 0.0
 
 
 def full_weights(satellite: dict[str, float], cash: float) -> dict[str, float]:
-    """แปลงน้ำหนักของ satellite เป็นน้ำหนักทั้งพอร์ต (core ถูกเติมให้อัตโนมัติ)"""
+    """Convert satellite weights to whole-portfolio weights (the core is added automatically)"""
     sleeve = 1.0 - config.PM_CORE_WEIGHT
     weights: dict[str, float] = {
         ticker: config.PM_CORE_WEIGHT * share for ticker, share in config.PM_CORE_MIX.items()
@@ -52,16 +52,16 @@ def full_weights(satellite: dict[str, float], cash: float) -> dict[str, float]:
 
 
 def turnover(old: dict[str, float], new: dict[str, float]) -> float:
-    """turnover ขาเดียว = ครึ่งหนึ่งของผลรวมการเปลี่ยนแปลงสัมบูรณ์ (รวมเงินสดด้วย)
+    """One-side turnover = half the sum of absolute changes (cash included).
 
-    ย้าย 20% จาก SPY ไป XLE → |−0.2| + |+0.2| = 0.4 → turnover = 0.2
+    Moving 20% from SPY to XLE -> |-0.2| + |+0.2| = 0.4 -> turnover = 0.2
     """
     keys = set(old) | set(new)
     return 0.5 * sum(abs(new.get(k, 0.0) - old.get(k, 0.0)) for k in keys)
 
 
 def describe() -> list[str]:
-    """บรรยายกรอบเป็นข้อ ๆ สำหรับใส่ในพรอมต์ — สร้างจาก config จึงไม่มีทางขัดกับตัวตรวจ"""
+    """Describe the mandate as a list for the prompt; built from config, so it cannot contradict the checks"""
     core = " / ".join(f"{t} {w:.0%}" for t, w in config.PM_CORE_MIX.items())
     sleeve = 1.0 - config.PM_CORE_WEIGHT
     return [

@@ -1,20 +1,20 @@
-"""ตาราง 59 — ผู้บริหารบริษัทจดทะเบียนซื้อขายหุ้นบริษัทตัวเอง (เทียบเท่า Form 4 ของ US)
+"""Form 59 table: executives of listed companies trading their own company's shares (the equivalent of the US Form 4).
 
-## ทำไมสำคัญ
+## Why it matters
 
-ผู้บริหารที่ซื้อหุ้นด้วยเงินตัวเองในตลาดมักเห็นอะไรที่ตลาดยังไม่เห็น — งานวิจัยฝั่ง US พบสัญญาณแรงที่สุด
-ในหุ้นเล็ก และเมื่อหลายคนซื้อพร้อมกัน (scanner US ให้น้ำหนักเรื่องนี้ใน finbg/scan/score.py)
-การขายมีความหมายน้อยกว่ามาก (ขายเพราะต้องใช้เงินได้ร้อยเหตุผล) จึงนับเฉพาะ "ซื้อ" หุ้นสามัญ
+Executives who buy shares in the market with their own money often see something the market has not; US research finds the strongest signal
+in small stocks and when several insiders buy at once (the US scanner weights this in finbg/scan/score.py).
+Sales mean much less (people sell for a hundred reasons), so only purchases of common shares count.
 
-## แหล่ง: บทความรายวันของ InfoQuest
+## Source: InfoQuest's daily articles
 
-ก.ล.ต. ไม่มีช่องทางอัตโนมัติให้ (sec.or.th บล็อกโปรแกรม · robots ห้ามหน้า idisc)
-InfoQuest ลงตารางทุกวันทำการเป็นข่าว — feed ให้หัวข้อ + ลิงก์ (news.py เก็บอยู่แล้ว)
-ไฟล์นี้เปิดลิงก์นั้นวันละ ~1 หน้าผ่าน articles.fetch_html (ตรวจ robots + เว้นจังหวะ) แล้วแยกตารางเป็นรายการ
+The Thai SEC offers no automated channel (sec.or.th blocks programs; robots.txt forbids the idisc pages).
+InfoQuest publishes the table as a news item every trading day; the feed gives the headline and link (news.py already stores them).
+This file opens that link about once a day through articles.fetch_html (robots check + pacing) and parses the table into entries.
 
-## ระวัง: วันที่ในตารางเป็น พ.ศ.
+## Careful: dates in the table use the Buddhist era
 
-"29/10/2569" = 29 ต.ค. 2026 — แปลงตอนเก็บ ไม่งั้นงานที่อ่านคลังจะคิดว่าเป็นปี 2569 จริง ๆ
+"29/10/2569" = 29 Oct 2026; convert when storing, or anything reading the store will think it really is the year 2569.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def _number(text: str) -> float | None:
 
 
 def parse(html: str) -> list[dict[str, Any]]:
-    """ทุกแถวในตารางที่หัวคอลัมน์ตรงกับตาราง 59 (หัวตารางอาจมีเครื่องหมาย * ต่อท้าย จึงจับด้วยคำขึ้นต้น)"""
+    """Every row of a table whose column headers match the Form 59 table (headers may end with *, so they are matched by their first words)"""
     from bs4 import BeautifulSoup
 
     rows: list[dict[str, Any]] = []
@@ -81,7 +81,7 @@ def parse(html: str) -> list[dict[str, Any]]:
 
 
 def posts() -> list[dict[str, Any]]:
-    """ข่าวตาราง 59 ทุกชิ้นที่เคยเห็นใน feed (จากคลังข่าวของ news.py)"""
+    """Every Form 59 news item ever seen in the feed (from news.py's news store)"""
     found: dict[str, dict[str, Any]] = {}
     for path in sorted(config.RAW_TH_NEWS.glob("*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -92,7 +92,7 @@ def posts() -> list[dict[str, Any]]:
 
 
 def processed() -> set[str]:
-    """ลิงก์ที่อ่านสำเร็จแล้ว — ไม่ดึงซ้ำ (ลิงก์ที่พลาดเพราะเน็ต/เว็บล่ม จะถูกลองใหม่รอบหน้า)"""
+    """Links already read successfully, never fetched again (links that failed because of the network or a site outage are retried next round)"""
     done: set[str] = set()
     for path in sorted(config.RAW_TH_INSIDER.glob("posts-*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -103,7 +103,7 @@ def processed() -> set[str]:
 
 
 def collect(limit: int = config.TH_FORM59_PER_RUN) -> dict[str, Any]:
-    pending = [p for p in posts() if p["url"] not in processed()][-limit:]   # ใหม่สุดก่อน ถ้าค้างเยอะ
+    pending = [p for p in posts() if p["url"] not in processed()][-limit:]   # Newest first, if there is a large backlog
     if not pending:
         return {"ok": True, "posts": 0, "rows": 0}
     log, frames = [], []
@@ -134,6 +134,6 @@ def read_all() -> pd.DataFrame:
     if not files:
         return pd.DataFrame()
     df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
-    # รายงานฉบับเดียวกันอาจถูกดึงซ้ำ (เช่น ลองใหม่หลังพลาด) — นับแถวเดียวกันครั้งเดียว
+    # The same report may be fetched twice (for example a retry after a failure); count identical rows once
     key = ["report_url", "company", "executive", "trade_date", "quantity", "price", "method"]
     return df.drop_duplicates(key).reset_index(drop=True)

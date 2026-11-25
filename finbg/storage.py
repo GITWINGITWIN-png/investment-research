@@ -1,13 +1,13 @@
-"""ชั้นเก็บข้อมูลที่บังคับวินัย point-in-time
+"""Storage layer that enforces point-in-time discipline.
 
-หัวใจของไฟล์นี้คือ: **ทุกอย่างที่เขียนลงดิสก์ต้องมี `fetched_at`**
+The core rule of this file: **everything written to disk must carry `fetched_at`**.
 
-เหตุผล (ดู note "09 - Evaluation Playbook"):
-ถ้าไม่รู้ว่าข้อมูลชิ้นหนึ่ง "เป็นที่รับรู้เมื่อไหร่" เราจะเผลอใช้ข้อมูลอนาคต
-ในการตัดสินใจย้อนหลังโดยไม่รู้ตัว = look-ahead bias ซึ่งทำให้ผลทดสอบทั้งหมดเป็นโมฆะ
+Why (see the note "09 - Evaluation Playbook"):
+without knowing when a piece of data became known, we would unknowingly use future data
+in backtested decisions, which is look-ahead bias and voids every test result.
 
-`fetched_at` คือ knowledge_date เวอร์ชันที่ระมัดระวังที่สุด: เรารู้แน่ว่า
-ณ เวลานั้นข้อมูลนี้มีอยู่จริงแล้ว (เพราะเราเพิ่งดึงมาได้)
+`fetched_at` is the most conservative version of knowledge_date: we know for certain
+that the data existed at that time (because we had just fetched it).
 """
 
 from __future__ import annotations
@@ -23,17 +23,17 @@ from . import config
 
 
 def utc_now() -> datetime:
-    """เวลาปัจจุบันแบบ timezone-aware เสมอ — naive datetime เป็นบ่อเกิดของบั๊ก"""
+    """Current time, always timezone-aware; naive datetimes breed bugs"""
     return datetime.now(tz=config.UTC)
 
 
 def utc_stamp() -> str:
-    """ISO string ที่ใช้เป็น fetched_at — วินาทีพอ ไม่ต้องละเอียดกว่านี้"""
+    """ISO string used as fetched_at; seconds are precise enough"""
     return utc_now().replace(microsecond=0).isoformat()
 
 
 def ensure_dirs() -> None:
-    """สร้างโฟลเดอร์ที่จำเป็นทั้งหมด เรียกซ้ำได้ไม่มีปัญหา"""
+    """Create every required folder; safe to call repeatedly"""
     for path in (
         config.RAW_PRICES,
         config.RAW_NEWS,
@@ -53,10 +53,10 @@ def ensure_dirs() -> None:
 
 
 def log_manifest(kind: str, path: Path, rows: int, **extra: Any) -> None:
-    """เขียน 1 บรรทัดต่อ 1 ไฟล์ที่เก็บ — นี่คือ audit trail ของคลังข้อมูล
+    """Write one line per stored file: the audit trail of the data store.
 
-    ใช้ JSONL เพราะ append ได้เรื่อย ๆ โดยไม่ต้องอ่านไฟล์เดิม
-    และถ้าไฟล์เสียกลางทาง บรรทัดก่อนหน้ายังอ่านได้
+    JSONL because it can be appended to without reading the file,
+    and if the file breaks midway, the earlier lines stay readable.
     """
     config.MANIFEST.parent.mkdir(parents=True, exist_ok=True)
     record = {
@@ -71,10 +71,10 @@ def log_manifest(kind: str, path: Path, rows: int, **extra: Any) -> None:
 
 
 def write_parquet(df: pd.DataFrame, path: Path, kind: str, **extra: Any) -> Path:
-    """เขียน DataFrame พร้อมแปะ fetched_at และบันทึกลง manifest
+    """Write a DataFrame with fetched_at attached and record it in the manifest.
 
-    ถ้ามีไฟล์เดิมอยู่แล้วจะ **ไม่เขียนทับ** แต่เติม suffix ใหม่
-    เพราะข้อมูลดิบที่เก็บไปแล้วคือหลักฐาน — การเขียนทับทำลาย audit trail
+    If the file already exists it is **never overwritten**; a new suffix is added instead,
+    because stored raw data is evidence, and overwriting would destroy the audit trail.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -93,10 +93,10 @@ def write_parquet(df: pd.DataFrame, path: Path, kind: str, **extra: Any) -> Path
 
 
 def write_jsonl(records: list[dict[str, Any]], path: Path, kind: str, **extra: Any) -> Path:
-    """เก็บข้อมูลกึ่งโครงสร้าง (เช่น ข่าว) แบบดิบที่สุด
+    """Store semi-structured data (such as news) in its rawest form.
 
-    เจตนา: เก็บ response ตามที่ได้มาจริง ไม่ตีความ ไม่ตัดฟิลด์
-    เพราะเราไม่รู้ว่าอีก 12 เดือนจะอยากใช้ฟิลด์ไหน — แต่ตอนนั้นย้อนไปเก็บใหม่ไม่ได้แล้ว
+    The intent: keep each response exactly as received, uninterpreted and with every field,
+    because we do not know which fields we will want in 12 months, and by then it cannot be collected again.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     stamp = utc_stamp()
@@ -116,10 +116,10 @@ def write_jsonl(records: list[dict[str, Any]], path: Path, kind: str, **extra: A
 
 
 def read_all_prices() -> pd.DataFrame:
-    """อ่าน snapshot ราคาทั้งหมดที่เคยเก็บ แล้วรวมเป็นตารางเดียว
+    """Read every stored price snapshot and merge them into one table.
 
-    ถ้ามีวันซ้ำ (เช่น รัน 2 รอบในวันเดียว) ให้เก็บแถวที่ fetched_at ใหม่สุด
-    เหตุผล: ราคาปิดอาจถูกปรับหลังตลาดปิด ค่าที่ดึงทีหลังจึงถูกต้องกว่า
+    If a date repeats (for example two runs in one day), keep the row with the newest fetched_at,
+    because closing prices can be corrected after the close, so the later value is more accurate.
     """
     files = sorted(config.RAW_PRICES.glob("*.parquet"))
     if not files:
@@ -139,9 +139,9 @@ def read_all_prices() -> pd.DataFrame:
 
 
 def price_matrix(field: str = "close") -> pd.DataFrame:
-    """แปลงเป็นตาราง wide: index = วันที่, columns = ticker
+    """Convert to a wide table: index = date, columns = ticker.
 
-    รูปแบบนี้คำนวณผลตอบแทน/โมเมนตัมได้ง่ายที่สุด
+    This shape makes returns and momentum easiest to compute.
     """
     df = read_all_prices()
     if df.empty:

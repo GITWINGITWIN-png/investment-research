@@ -1,22 +1,22 @@
-"""Work queue — บอกว่า token ที่เหลือควรไปลงตรงไหน
+"""Work queue: says where the remaining tokens should go.
 
-## ปัญหาที่แก้
+## The problem
 
-"เดือนนี้ token เหลือเยอะ แต่ไม่รู้จะใช้ทำอะไร" → สุดท้ายหมดอายุไปเปล่า ๆ
+"Lots of tokens left this month, but no idea what to use them on", so they expire unused.
 
-## หลักการจัดลำดับ
+## Ordering principle
 
-    ใช้ token กับสิ่งที่ย้อนหลังทำไม่ได้ก่อน แล้วค่อยลงมาที่สิ่งที่ทำทีหลังได้
+    Spend tokens on what cannot be done later first, then move down to what can wait.
 
-| ระดับ | งาน | ย้อนหลังทำได้ไหม |
+| Level | Task | Can it be done later? |
 |-------|-----|-----------------|
-| L1 | เติมบทวิเคราะห์ใน brief | ❌ ปนเปื้อน hindsight ทันที |
-| L2 | label ข่าว | ❌ ปนเปื้อน hindsight ทันที |
-| L3 | ทดสอบสมมติฐาน | ⚠️ ได้ แต่ช้าลง |
-| L4 | สรุป paper เป็นโน้ต | ✅ ได้ตลอด |
+| L1 | add analysis to the brief | ❌ contaminated by hindsight at once |
+| L2 | label news | ❌ contaminated by hindsight at once |
+| L3 | test hypotheses | ⚠️ yes, but slower |
+| L4 | summarise papers into notes | ✅ any time |
 
-L1/L2 "เน่า" ตามเวลา — ทิ้งไว้ยิ่งนานยิ่งไร้ค่า เพราะเราเริ่มรู้ผลลัพธ์แล้ว
-L4 ไม่เน่า จึงเป็น "ที่ทิ้ง token" ที่ปลอดภัยเมื่อเหลือเยอะ
+L1 and L2 "rot" over time: the longer they wait, the less they are worth, because we start to know the outcome.
+L4 does not rot, so it is the safe place to spend tokens when many are left.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from . import config, labels
 
 
 def _brief_needs_analysis() -> list[dict[str, str]]:
-    """brief ที่ยังไม่ได้เติมบทวิเคราะห์ — เรียงเก่าไปใหม่ (ของเก่าเน่าเร็วกว่า)"""
+    """Briefs still missing their analysis, oldest first (older ones rot faster)"""
     pending: list[dict[str, str]] = []
     for path in sorted(config.BRIEFS.glob("*.md")):
         text = path.read_text(encoding="utf-8")
@@ -40,7 +40,7 @@ def _brief_needs_analysis() -> list[dict[str, str]]:
 
 
 def _hypotheses_backlog() -> list[dict[str, str]]:
-    """สมมติฐานที่ยังไม่ได้ทดสอบ"""
+    """Hypotheses not yet tested"""
     backlog: list[dict[str, str]] = []
     for path in sorted(config.HYPOTHESES.glob("*.md")):
         text = path.read_text(encoding="utf-8")
@@ -58,7 +58,7 @@ def _hypotheses_backlog() -> list[dict[str, str]]:
 
 
 def _papers_unread() -> list[dict[str, str]]:
-    """paper ที่ยังไม่มีโน้ตสรุป เรียงตาม tier (1 = ควรอ่านก่อน)"""
+    """Papers without a summary note, by tier (1 = read first)"""
     config.PAPER_NOTES.mkdir(parents=True, exist_ok=True)
     existing = {p.stem for p in config.PAPER_NOTES.glob("*.md")}
     unread = [p for p in config.PAPERS if p["id"] not in existing]
@@ -66,11 +66,11 @@ def _papers_unread() -> list[dict[str, str]]:
 
 
 def build() -> list[dict[str, Any]]:
-    """ประกอบคิวงานทั้งหมด เรียงตามความสำคัญ (L1 ก่อน L4)"""
+    """Assemble the whole work queue in order of importance (L1 before L4)"""
     items: list[dict[str, Any]] = []
 
-    # L1 เดิม = เติมบทวิเคราะห์ใน brief ทุกวัน → ไม่มีใครทำจริง (45 ฉบับค้างหมด)
-    # แทนด้วยแผนรายสัปดาห์ที่ออกเองอัตโนมัติ — ขึ้นคิวเฉพาะเมื่อถึงเวลาแล้วยังไม่ออก
+    # The old L1 = add analysis to the brief every day, which nobody actually did (all 45 were left undone)
+    # Replaced by the automatic weekly plan; it enters the queue only when a plan is due and not yet issued
     from .pm import runner as pm_runner
 
     plan_state = pm_runner.due()
@@ -112,7 +112,7 @@ def build() -> list[dict[str, Any]]:
             "level": "L3",
             "perishable": False,
             "cost": hypothesis["cost"],
-            # title ในไฟล์ขึ้นต้นด้วย ID อยู่แล้ว (เช่น "H-001: ...") จึงไม่ต้องเติมซ้ำ
+            # Titles in the files already start with the ID (such as "H-001: ..."), so it is not added again
             "what": f"ทดสอบ {hypothesis['title'][:70]}",
             "why": "เปลี่ยนไอเดียเป็นผลลัพธ์ที่วัดได้",
             "how": f"เปิด {hypothesis['file']} แล้วทำตามหัวข้อ 'ทดสอบยังไง'",
@@ -132,7 +132,7 @@ def build() -> list[dict[str, Any]]:
 
 
 def summary() -> dict[str, Any]:
-    """นับงานคงค้างแยกตามระดับ"""
+    """Count the backlog per level"""
     items = build()
     by_level: dict[str, int] = {}
     for item in items:
@@ -145,7 +145,7 @@ def summary() -> dict[str, Any]:
 
 
 def export(path_suffix: str = "") -> str:
-    """เขียนคิวเป็น JSON ให้ Claude อ่านได้ทีเดียวจบ"""
+    """Write the queue as JSON for Claude to read in one go"""
     out_dir = config.DATA / "queue"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"workqueue{path_suffix}.json"

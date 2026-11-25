@@ -1,13 +1,13 @@
-"""ข่าวจาก GDELT DOC 2.0 API
+"""News from the GDELT DOC 2.0 API.
 
-จุดแข็ง: กว้างที่สุด ครอบคลุมสื่อทั่วโลกหลายภาษา ฟรี ไม่ต้องมี key
+Strength: the widest coverage, world media in many languages, free, no key.
 
-จุดอ่อนที่เจอจากการทดสอบจริง — เป็นเหตุผลที่ต้องมีแหล่งอื่นด้วย:
-- **เข้มเรื่อง rate limit มากกว่าที่เอกสารระบุ** ยิงห่าง 6 วินาทียังโดน HTTP 429
-- เมื่อโดนแล้วติดค้างนานหลายสิบนาทีแม้หยุดยิงแล้ว
-- เก็บแค่ metadata + URL ไม่มีเนื้อบทความ (และ URL เน่าตามเวลา)
+Weaknesses found in real tests, which are why other sources exist:
+- **Rate limits are stricter than documented**: requests 6 seconds apart still get HTTP 429
+- Once limited, it stays blocked for tens of minutes even after requests stop
+- Only metadata and URLs, no article text (and the URLs rot over time)
 
-ถ้าต้องการปริมาณมาก GDELT แนะนำให้ใช้ BigQuery แทน DOC API
+For large volumes GDELT recommends BigQuery instead of the DOC API.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ _last_request_at: float = 0.0
 
 
 def _throttled_get(params: dict[str, str]) -> requests.Response:
-    """ยิง request โดยเว้นระยะให้ครบตามที่ตั้งไว้เสมอ"""
+    """Send a request, always keeping the configured spacing"""
     global _last_request_at
 
     elapsed = time.monotonic() - _last_request_at
@@ -46,10 +46,10 @@ def _throttled_get(params: dict[str, str]) -> requests.Response:
 
 
 def _query(search: str, timespan: str, deadline: float) -> list[dict[str, Any]]:
-    """ขอบทความสำหรับ 1 คำค้น — คืน list ว่างถ้าล้มเหลว
+    """Fetch articles for one query; returns an empty list on failure.
 
-    GDELT บอกว่าโดน rate limit ได้ 2 แบบ: HTTP 429
-    หรือ HTTP 200 ที่ body เป็นข้อความเตือนแทน JSON — ต้องเช็คทั้งคู่
+    GDELT signals a rate limit in two ways: HTTP 429,
+    or HTTP 200 with a warning message instead of JSON in the body; both must be checked.
     """
     params = {
         "query": search,
@@ -94,7 +94,7 @@ def _query(search: str, timespan: str, deadline: float) -> list[dict[str, Any]]:
 
 
 def fetch(timespan: str = "1d") -> list[dict[str, Any]]:
-    """ดึงตามชุดคำค้นที่ตั้งไว้ — มี circuit breaker และเพดานเวลา"""
+    """Fetch the configured set of queries, with a circuit breaker and a time limit"""
     searches = [*config.NEWS_QUERIES, config.watchlist_news_query()]
     deadline = time.monotonic() + config.GDELT_TIME_BUDGET_SEC
     records: list[dict[str, Any]] = []
@@ -124,8 +124,8 @@ def fetch(timespan: str = "1d") -> list[dict[str, Any]]:
                 )
             )
 
-        # Circuit breaker: คำค้นแรกไม่ผ่าน = ติด penalty box อยู่
-        # ยิงต่อก็โดนหมด เลิกทันทีดีกว่าเสียเวลา
+        # Circuit breaker: if the first query fails we are in the penalty box,
+        # and every further request would fail too, so stop at once instead of wasting time
         if i == 1 and not articles:
             print("  🔌 gdelt: คำค้นแรกไม่ผ่าน — หยุดทั้งรอบ")
             break

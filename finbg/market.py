@@ -1,21 +1,21 @@
-"""เวลาของตลาดหุ้นสหรัฐ — คำถาม "ข้อมูลนี้รู้ได้เมื่อไหร่" ทุกข้อผ่านไฟล์นี้
+"""US stock-market time: every "when could this be known" question goes through this file.
 
-## ทำไมต้องมีไฟล์นี้
+## Why this file exists
 
-ระบบรันจากประเทศไทย แต่ตลาดอยู่นิวยอร์ก ช่วงซื้อขายปกติคือ 09:30–16:00 ET
-ซึ่งตรงกับ **20:30–03:00 เวลาไทย** (ช่วง EDT) หรือ 21:30–04:00 (ช่วง EST)
+The system runs from Thailand, but the market is in New York; regular trading is 09:30 to 16:00 ET,
+which is **20:30 to 03:00 Thai time** (during EDT) or 21:30 to 04:00 (during EST).
 
-พอเปลี่ยนจาก cron 06:00 มาเป็น anacron ที่รัน "ตอนเครื่องเปิด" งานอาจรันกลางคืน
-ขณะตลาดยังเปิดอยู่ — ถ้าไม่ระวัง เราจะเก็บราคา "ระหว่างวัน" ไว้ในช่อง close
-และ brief/แผนจะตีความผิดว่าเป็นราคาปิด ฟังก์ชันที่นี่จึงนิยามกติกาให้ชัด:
+After moving from a 06:00 cron job to anacron, which runs "when the machine is on", a job may run at night
+while the market is still open. Without care we would store an intraday price in the close field,
+and the brief and the plan would read it as a closing price. So the rules are defined here:
 
-1. **เก็บเฉพาะแท่งที่ปิดแล้ว** — ตลาดยังเปิดอยู่ ตัดแท่งของวันนี้ทิ้ง
-2. **แผนมีผลที่ราคาปิดของวันทำการแรกที่ปิด *หลัง* เวลาตัดสินใจ**
-   (เท่ากับส่งคำสั่ง market-on-close ได้จริง) — กัน look-ahead โดยโครงสร้าง
+1. **Store only closed bars**: while the market is open, today's bar is dropped.
+2. **A plan takes effect at the close of the first trading day that closes *after* the decision time**
+   (as if a market-on-close order could really be sent), which rules out look-ahead by construction.
 
-วันหยุดตลาดไม่ได้ใส่ปฏิทินไว้ตรงนี้โดยตั้งใจ: วันหยุดไม่มีแท่งราคาอยู่แล้ว
-ฟังก์ชันที่ต้องรู้ "วันทำการจริง" จึงรับปฏิทินจากข้อมูลราคา (วันที่ SPY มีราคา)
-แทนการดูแลรายการวันหยุดเอง ซึ่งผิดได้และต้องอัปเดตทุกปี
+Market holidays are deliberately not listed here: holidays have no price bar anyway,
+so functions that need "real trading days" take the calendar from the price data (days on which SPY has a price)
+instead of a hand-kept holiday list that can be wrong and needs yearly updates.
 """
 
 from __future__ import annotations
@@ -41,24 +41,24 @@ def to_et(moment: datetime) -> datetime:
 
 
 def is_session_open(now: datetime | None = None) -> bool:
-    """ตลาดสหรัฐเปิดอยู่ตอนนี้ไหม (จันทร์–ศุกร์ 09:30–16:00 ET, ไม่นับวันหยุด)
+    """Whether the US market is open right now (Monday to Friday 09:30 to 16:00 ET, holidays not counted).
 
-    การไม่รู้วันหยุดไม่ทำให้ผิด: วันหยุดไม่มีแท่งราคาของวันนั้นให้ตัดอยู่แล้ว
+    Not knowing holidays does no harm: a holiday has no bar to drop anyway.
     """
     et = to_et(now or utc_now())
     return et.weekday() < 5 and SESSION_OPEN <= et.time() < SESSION_CLOSE
 
 
 def session_close_utc(day: date) -> datetime:
-    """เวลาปิดตลาดของวันนั้นเป็น UTC — 16:00 ET แปลงตาม DST ของวันนั้นเอง"""
+    """That day's market close in UTC: 16:00 ET converted with that day's own DST"""
     return datetime.combine(day, SESSION_CLOSE, tzinfo=ET).astimezone(config.UTC)
 
 
 def drop_incomplete_session(df: pd.DataFrame, now: datetime | None = None) -> tuple[pd.DataFrame, int]:
-    """ตัดแท่งราคาของวันที่ตลาดยังซื้อขายอยู่ — คืน (ตารางที่เหลือ, จำนวนแถวที่ตัด)
+    """Drop the bars of a day that is still trading; returns (remaining table, number of rows dropped).
 
-    yfinance คืนแท่งของวันนี้ทั้งที่ตลาดยังไม่ปิด โดยใส่ราคาล่าสุดไว้ในช่อง close
-    ถ้าเก็บไว้ snapshot วันนั้นจะมี "ราคาปิด" ที่ไม่ใช่ราคาปิดจริง
+    yfinance returns today's bar before the close, with the latest price in the close field;
+    keeping it would give that day's snapshot a "close" that is not the real close.
     """
     if df.empty or not is_session_open(now):
         return df, 0
@@ -68,14 +68,14 @@ def drop_incomplete_session(df: pd.DataFrame, now: datetime | None = None) -> tu
 
 
 def effective_session(created_at: datetime, sessions: pd.DatetimeIndex) -> pd.Timestamp | None:
-    """วันทำการแรกที่ตลาด **ปิดหลัง** เวลาตัดสินใจ = วันที่แผนเริ่มมีผล
+    """First trading day whose market close is **after** the decision time = the day the plan takes effect.
 
-    ตัวอย่าง: แผนออกเสาร์ 06:00 ไทย → วันจันทร์คือวันแรกที่ปิดหลังจากนั้น
-    → ปรับพอร์ตที่ราคาปิดวันจันทร์ ผลตอบแทนแรกที่นับคือวันอังคาร
+    Example: a plan issued Saturday 06:00 Thai time -> Monday is the first day that closes after it,
+    so the portfolio is rebalanced at Monday's close and the first counted return is Tuesday's.
 
-    ระมัดระวังกว่าการนับตั้งแต่ราคาเปิดวันจันทร์ (เสียผลตอบแทนช่วงเช้าวันจันทร์ไป)
-    แต่ไม่มีทางได้ประโยชน์จากข่าวสุดสัปดาห์ที่แผนอ่านไปแล้ว — ยอมเสียเปรียบดีกว่าโกง
-    คืน None ถ้าวันนั้นยังมาไม่ถึง (ยังไม่มีราคาปิดในข้อมูล)
+    This is more conservative than counting from Monday's open (it gives up Monday's morning return)
+    but can never profit from weekend news the plan already read; a handicap is better than cheating.
+    Returns None if that day has not come yet (no close in the data).
     """
     for day in sessions:
         if session_close_utc(day.date()) > created_at:
@@ -84,16 +84,16 @@ def effective_session(created_at: datetime, sessions: pd.DatetimeIndex) -> pd.Ti
 
 
 def last_close_before(created_at: datetime, sessions: pd.DatetimeIndex) -> pd.Timestamp | None:
-    """วันทำการล่าสุดที่ปิดไปแล้ว ณ เวลาตัดสินใจ — ใช้เป็นราคาอ้างอิงของคำทำนาย"""
+    """Latest trading day already closed at decision time; used as the reference price of a prediction"""
     past = [d for d in sessions if session_close_utc(d.date()) <= created_at]
     return past[-1] if past else None
 
 
 def next_session_date(now: datetime | None = None) -> date:
-    """วันทำการถัดไปที่ยังไม่ปิด (นับจันทร์–ศุกร์ ไม่รู้วันหยุด)
+    """Next trading day not yet closed (counting Monday to Friday, without holidays).
 
-    ใช้ตัดสินว่า "แผนรายสัปดาห์ของสัปดาห์ไหน" — เช้าวันเสาร์เวลาไทย
-    (= เย็นวันศุกร์ที่นิวยอร์ก หลังปิดตลาด) วันถัดไปคือจันทร์ → แผนของสัปดาห์หน้า
+    Used to decide "which week a weekly plan belongs to": on Saturday morning Thai time
+    (Friday evening in New York, after the close) the next day is Monday, so it is next week's plan.
     """
     et = to_et(now or utc_now())
     day = et.date()
@@ -106,13 +106,13 @@ def next_session_date(now: datetime | None = None) -> date:
 
 
 def iso_week(day: date) -> str:
-    """ชื่อสัปดาห์แบบ ISO เช่น 2026-W44 — เรียงตามตัวอักษรได้ถูกลำดับเวลา"""
+    """ISO week name such as 2026-W44; sorts alphabetically in time order"""
     year, week, _ = day.isocalendar()
     return f"{year}-W{week:02d}"
 
 
 def sessions_from_prices(prices: pd.DataFrame) -> pd.DatetimeIndex:
-    """ปฏิทินวันทำการจริงจากข้อมูล — วันที่ SPY มีราคา (ตัด BTC ที่เทรด 7 วันออก)"""
+    """Real trading calendar from the data: days on which SPY has a price (dropping BTC, which trades 7 days)"""
     if "SPY" in prices.columns:
         return prices["SPY"].dropna().index
     return prices.index

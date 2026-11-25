@@ -1,16 +1,16 @@
-"""finlab — evaluation harness ของงานวิจัย (เฟส 0 ใน 07 - Long-term Roadmap)
+"""finlab: the research evaluation harness (phase 0 in 07 - Long-term Roadmap).
 
-หน้าที่เดียวของแพ็กเกจนี้: **บอกให้ได้ว่า algo/factor ไหนจริง อันไหนแค่โชค**
+The package has one job: **tell which algorithms or factors are real and which are luck**.
 
-    data.py         universe + ราคาย้อนหลังสำหรับวิจัย (แยกจากคลัง PIT ของ finbg)
-    factors.py      factor อ้างอิง + factor ปลอมสำหรับทดสอบตัว harness เอง
+    data.py         universe + price history for research (separate from finbg's point-in-time store)
+    factors.py      reference factors + fake factors for testing the harness itself
     metrics.py      IC, Rank IC, ICIR, decay curve, quantile spread, turnover
     validation.py   walk-forward, purged k-fold + embargo
     stats.py        Sharpe, Probabilistic/Deflated Sharpe, PBO (CSCV)
-    costs.py        ต้นทุนซื้อขายตาม turnover
-    experiments.py  บันทึกทุกการทดลอง — จำนวนครั้งที่ลองคือตัวแปรของ Deflated Sharpe
-    gate.py         ประตู 1: harness ต้องปฏิเสธของปลอมได้ก่อนจะเชื่อของจริง
+    costs.py        trading costs from turnover
+    experiments.py  records every experiment; the number of trials is an input to the Deflated Sharpe
+    gate.py         gate 1: the harness must reject fakes before it can be trusted on real factors
 
-ทำไมเขียนเองแทน alphalens/Qlib (ตามโน้ต 07): ถ้าไม่เคยเขียนเอง จะไม่รู้ว่าตัวเลขหลอกเราได้ยังไง
-แต่ละฟังก์ชันจึงสั้นและมี docstring อธิบายว่าคำนวณอะไร และกับดักอยู่ตรงไหน
+Why write it by hand instead of using alphalens or Qlib (per note 07): without writing it yourself you never learn how the numbers can fool you.
+So each function is short, with a docstring that says what it computes and where the trap is.
 """

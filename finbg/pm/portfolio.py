@@ -1,22 +1,22 @@
-"""พอร์ตกระดาษของ PM — จำลองทุกวันที่ราคาปิด เทียบกับ control บนตารางปรับพอร์ตเดียวกัน
+"""The PM's paper portfolio: simulated daily at the close, against a control on the same rebalancing schedule.
 
-## เส้นที่คำนวณ
+## Lines computed
 
-| เส้น | คืออะไร | ตอบคำถามอะไร |
+| Line | What it is | Question it answers |
 |---|---|---|
-| `llm_pm` | พอร์ตจริงตามแผน (core + satellite ที่ PM เลือก) | พอร์ตทั้งก้อนทำได้เท่าไหร่ |
-| `pm_control` | core เดียวกัน + satellite ถือ SPY เฉย ๆ | ถ้าไม่มี PM จะได้เท่าไหร่ |
-| `llm_satellite` | เฉพาะส่วน satellite ของ PM | ฝีมือ PM แบบไม่ถูก core เจือจาง |
-| `passive_satellite` | เฉพาะ satellite ของ control (SPY) | ตัวเทียบของเส้นบน |
+| `llm_pm` | the real portfolio per plan (core + the PM's satellite) | what the whole portfolio achieved |
+| `pm_control` | the same core + a satellite that just holds SPY | what we would get without the PM |
+| `llm_satellite` | the PM's satellite only | the PM's skill, not diluted by the core |
+| `passive_satellite` | the control's satellite only (SPY) | the benchmark for the line above |
 
-ทั้งสี่เส้นปรับพอร์ต **วันเดียวกัน** และเสียต้นทุนแบบเดียวกัน ความต่างจึงมาจากการเลือกของ PM อย่างเดียว
-เส้น baseline เดิม (buy_hold_spy, sixty_forty, mom_12_1) ถูก rebase มาเริ่มวันเดียวกันเพื่อเทียบ
+All four lines rebalance **on the same day** and pay the same costs, so any difference comes only from the PM's choices.
+The older baselines (buy_hold_spy, sixty_forty, mom_12_1) are rebased to the same start date for comparison.
 
-## กติกาการจำลอง (ระมัดระวังโดยตั้งใจ)
+## Simulation rules (deliberately conservative)
 
-- แผนมีผลที่ **ราคาปิดของวันทำการแรกที่ตลาดปิดหลังแผนออก** (market.effective_session)
-- ระหว่างแผน น้ำหนักลอยตามราคา (ไม่ปรับรายวันแบบ ledger เดิม ซึ่งไม่สมจริง)
-- ต้นทุน = PM_COST_BPS × มูลค่าที่ซื้อขาย · เงินสดได้ผลตอบแทน 0% (ไม่นับดอกเบี้ย)
+- A plan takes effect at **the close of the first trading day that closes after the plan is issued** (market.effective_session)
+- Within a plan, weights drift with prices (no daily rebalancing as in the old ledger, which is unrealistic)
+- Cost = PM_COST_BPS x traded value; cash earns 0% (interest is not counted)
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ LEDGER_PATH = config.DERIVED / "pm_ledger.parquet"
 
 
 def price_table() -> pd.DataFrame:
-    """ราคาปรับแล้ว (รวมเงินปันผล) เฉพาะวันทำการของตลาดหุ้น — ช่องว่างใช้ราคาล่าสุด"""
+    """Adjusted prices (dividends included) on stock-market trading days only; gaps use the latest price"""
     prices = storage.price_matrix("adj_close")
     if prices.empty:
         return prices
@@ -42,9 +42,9 @@ def price_table() -> pd.DataFrame:
 
 
 def schedule(records: list[dict[str, Any]], sessions: pd.DatetimeIndex) -> tuple[list[tuple[pd.Timestamp, dict[str, Any]]], list[str]]:
-    """(วันที่มีผล, แผน) เรียงตามเวลา + รายชื่อแผนที่ยังรอวันมีผล
+    """(effective date, plan) in time order, plus the plans still waiting for their effective date.
 
-    สองแผนมีผลวันเดียวกัน (เช่น replan ตามหลังแผนรายสัปดาห์) → ใช้แผนที่ออกทีหลัง
+    When two plans take effect on the same day (for example a replan right after a weekly plan), the later one is used.
     """
     by_day: dict[pd.Timestamp, dict[str, Any]] = {}
     pending: list[str] = []
@@ -63,9 +63,9 @@ def simulate(
     capital: float = config.LEDGER_START_CAPITAL,
     cost_bps: float = config.PM_COST_BPS,
 ) -> tuple[pd.DataFrame, dict[str, float]]:
-    """เดินทีละวันทำการ: ลอยตามราคา → ถ้าวันนี้มีแผน ปรับพอร์ตที่ราคาปิด
+    """Step one trading day at a time: drift with prices, and if a plan takes effect today, rebalance at the close.
 
-    คืน (ตาราง nav/traded/cost รายวัน, มูลค่าที่ถือ ณ วันสุดท้าย)
+    Returns (daily nav/traded/cost table, holdings value on the last day)
     """
     start = min(targets_by_day)
     days = prices.index[prices.index >= start]
@@ -87,7 +87,7 @@ def simulate(
         traded = cost = 0.0
         target = targets_by_day.get(day)
         if target is not None:
-            current = holdings or {mandate.CASH: nav}      # วันแรก: เริ่มจากเงินสดทั้งก้อน
+            current = holdings or {mandate.CASH: nav}      # First day: start fully in cash
             wanted = {ticker: weight * nav for ticker, weight in target.items()}
             traded = sum(
                 abs(wanted.get(t, 0.0) - current.get(t, 0.0))
@@ -113,7 +113,7 @@ def _stats(series: pd.Series) -> dict[str, float]:
 
 
 def build() -> dict[str, Any]:
-    """คำนวณพอร์ต PM ใหม่ทั้งหมดจากแผนทุกฉบับ (deterministic — รันซ้ำได้ผลเดิม)"""
+    """Recompute the whole PM portfolio from every plan (deterministic: re-running gives the same result)"""
     records = plans_module.load_all()
     if not records:
         return {"ok": True, "started": False}

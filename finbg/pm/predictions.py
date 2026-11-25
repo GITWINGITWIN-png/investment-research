@@ -1,20 +1,20 @@
-"""ตัดสินคำทำนายด้วยราคาอัตโนมัติ + วัด calibration
+"""Resolve predictions automatically from prices, and measure calibration.
 
-## ทำไมต้องให้โค้ดตัดสิน
+## Why code resolves them
 
-prediction journal เดิมตายเพราะต้องเปิดไฟล์มากรอกผลเอง — แรงเสียดทานฆ่านิสัย
-คำทำนายในแผนจึงบังคับให้เป็นเงื่อนไขที่ตัดสินด้วยราคาได้ แล้วโค้ดตัดสินเองทุกวัน
-ผลที่ได้ป้อนกลับเข้าแผนสัปดาห์ถัดไป (scorecard) — นี่คือวงจร "เรียนรู้จากความผิดพลาด"
+The old prediction journal died because results had to be filled in by hand; friction kills habits.
+Predictions in plans therefore have to be conditions that prices can settle, and code settles them every day.
+The results feed back into the next week's plan (scorecard); that is the "learn from mistakes" loop.
 
-## ชนิดคำทำนาย
+## Prediction kinds
 
-| kind | ถูกเมื่อ | ตัดสินเมื่อ |
+| kind | correct when | resolved when |
 |---|---|---|
-| touch_above / touch_below | ราคาปิดวันใดวันหนึ่งในช่วง ทะลุ level | ทันทีที่ทะลุ หรือครบกำหนด |
-| end_above / end_below | ราคาปิดวันสุดท้ายก่อนครบกำหนด เหนือ/ใต้ level | ครบกำหนด |
-| outperform / underperform | ผลตอบแทนรวมปันผลชนะ/แพ้ benchmark | ครบกำหนด |
+| touch_above / touch_below | any close in the window crosses the level | as soon as it crosses, or at the deadline |
+| end_above / end_below | the last close before the deadline is above/below the level | at the deadline |
+| outperform / underperform | total return with dividends beats/trails the benchmark | at the deadline |
 
-ราคาอ้างอิง = ราคาปิดล่าสุดที่รู้ ณ เวลาที่ทำนาย — ไม่มีทางใช้ข้อมูลอนาคต
+The reference price is the latest close known at prediction time, so future data can never be used.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def _last_weekday_on_or_before(day: date) -> date:
 
 def evaluate(prediction: dict[str, Any], close: pd.DataFrame, adj: pd.DataFrame,
              now: datetime | None = None) -> tuple[str | None, dict[str, Any]]:
-    """คืน ("correct"/"wrong", รายละเอียด) หรือ (None, ...) ถ้ายังตัดสินไม่ได้"""
+    """Return ("correct"/"wrong", details), or (None, ...) if it cannot be resolved yet"""
     sessions = market.sessions_from_prices(close)
     created = datetime.fromisoformat(prediction["created_at"])
     reference = market.last_close_before(created, sessions)
@@ -121,7 +121,7 @@ def _price_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def resolve_all(now: datetime | None = None) -> dict[str, Any]:
-    """ตัดสินทุกข้อที่ถึงเวลา — ของแผน (append ลง resolutions.jsonl) และของ journal เดิม"""
+    """Resolve everything that is due: plan predictions (appended to resolutions.jsonl) and the old journal"""
     close, adj = _price_tables()
     if close.empty:
         return {"ok": False, "reason": "ไม่มีราคา"}
@@ -151,7 +151,7 @@ def resolve_all(now: datetime | None = None) -> dict[str, Any]:
 
 
 def scorecard(limit: int = 10) -> dict[str, Any]:
-    """ผลคำทำนายของ PM: อัตราถูก, Brier score, calibration ต่อช่วงความมั่นใจ"""
+    """PM prediction results: hit rate, Brier score, calibration per confidence band"""
     records = list(_resolved().values())
     if not records:
         return {"n": 0}
@@ -169,15 +169,15 @@ def scorecard(limit: int = 10) -> dict[str, Any]:
         "n": len(records),
         "hit_rate_pct": round(sum(hits) / len(hits) * 100, 1),
         "avg_confidence_pct": round(sum(probs) / len(probs) * 100, 1),
-        # Brier: 0 = สมบูรณ์แบบ · 0.25 = เท่ากับเดา 50% ทุกข้อ
+        # Brier: 0 = perfect, 0.25 = the same as guessing 50% every time
         "brier": round(sum((p - h) ** 2 for p, h in zip(probs, hits)) / len(hits), 4),
         "buckets": buckets,
         "recent": recent,
     }
 
 
-# --- คำทำนายเก่าใน Journal/Predictions (เขียนมือ) ------------------------------
-# ตัดสินอัตโนมัติได้ถ้า frontmatter มี resolution_kind / ticker / level (หรือ benchmark)
+# --- Older hand-written predictions in Journal/Predictions ------------------------------
+# Resolved automatically if the frontmatter has resolution_kind / ticker / level (or benchmark)
 
 def _frontmatter(text: str) -> dict[str, str]:
     if not text.startswith("---"):

@@ -1,7 +1,7 @@
-"""ค่าตั้งต้นทั้งหมดของ background track อยู่ที่ไฟล์เดียวนี้
+"""Every setting of the background track lives in this one file.
 
-เหตุผลที่รวมไว้ที่เดียว: เวลาปรับ universe หรือย้าย path จะได้ไม่ต้องไล่แก้หลายไฟล์
-และเวลาอ่านย้อนหลังใน 6 เดือน จะได้รู้ทันทีว่าตอนนั้นตั้งค่าอะไรไว้
+Keeping them in one place means changing the universe or moving a path touches a single file,
+and reading back in six months shows at once what the settings were then.
 """
 
 from __future__ import annotations
@@ -11,31 +11,31 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 # --- Paths -------------------------------------------------------------------
-# ทุก path อ้างอิงจาก root ของโปรเจกต์ เพื่อให้รันจาก cron ที่ไหนก็ได้
+# Every path is relative to the project root, so cron can run it from anywhere
 ROOT = Path(__file__).resolve().parent.parent
 
 DATA = ROOT / "data"
-RAW = DATA / "raw"                  # ข้อมูลดิบ ห้ามแก้ ห้ามเขียนทับ
-DERIVED = DATA / "derived"          # ของที่คำนวณใหม่ได้เสมอ ลบทิ้งได้
+RAW = DATA / "raw"                  # Raw data: never edit, never overwrite
+DERIVED = DATA / "derived"          # Derived data: can always be recomputed, safe to delete
 
 RAW_PRICES = RAW / "prices"
 RAW_NEWS = RAW / "news"
-MANIFEST = RAW / "_manifest.jsonl"  # log ว่าดึงอะไรตอนไหน = knowledge_date
+MANIFEST = RAW / "_manifest.jsonl"  # Log of what was fetched when = knowledge_date
 
-JOURNAL = ROOT / "Journal"          # โฟลเดอร์ที่ Obsidian อ่าน
+JOURNAL = ROOT / "Journal"          # Folder that Obsidian reads
 PREDICTIONS = JOURNAL / "Predictions"
 HYPOTHESES = JOURNAL / "Hypotheses"
 BRIEFS = JOURNAL / "Briefs"
 
 # --- Time --------------------------------------------------------------------
-# เก็บทุก timestamp เป็น UTC เสมอ (ตลาดคนละ timezone กัน จะได้ไม่สับสน)
-# แต่ตอนแสดงผลใน brief ใช้เวลาไทยเพราะคนอ่านคือคุณ
+# Every timestamp is stored in UTC (markets are in different time zones, so this avoids confusion)
+# but the brief shows Thai time, because the reader is in Thailand
 UTC = ZoneInfo("UTC")
 LOCAL_TZ = ZoneInfo("Asia/Bangkok")
 
 # --- Universe ----------------------------------------------------------------
-# ชุดนี้คือ "สภาพตลาด" ไม่ใช่ universe สำหรับหา factor
-# universe จริงสำหรับงาน quant จะมาตอนเฟส 1 — ตอนนี้เอาแค่พอเห็นภาพรวม
+# This set describes market conditions; it is not the universe for factor research
+# The real universe for quant work comes in phase 1; for now this is enough for an overview
 
 BENCHMARKS: dict[str, str] = {
     "SPY": "S&P 500",
@@ -63,16 +63,16 @@ SECTORS: dict[str, str] = {
     "XLC": "Communication Services",
 }
 
-# หุ้นตัวแทนของแต่ละ sector — โครงสร้างนี้ทำสองหน้าที่พร้อมกัน
-#   1. บอกว่าจะไปค้นข่าวของหุ้นตัวไหน
-#   2. เป็นแผนที่ข่าวรายตัว → sector เพื่อยุบเป็น cross-section ทีหลัง
+# Representative stocks for each sector; this structure does two jobs at once:
+# 1. it says which stocks to search news for
+# 2. it maps stock-level news to a sector, to aggregate into a cross-section later
 #
-# ทำไมต้องครบทั้ง 11 sector: งาน cross-sectional คือการ **จัดอันดับ** หลายตัว
-# ในวันเดียวกันแล้วซื้อกลุ่มบนขายกลุ่มล่าง ถ้ามีข่าวแค่ 3 sector อีก 8 ช่องว่าง
-# ก็จัดอันดับไม่ได้ — เดิมมีแค่ XLK/XLC/XLY จึงติดข้อจำกัดนี้
+# Why all 11 sectors: cross-sectional work **ranks** many stocks
+# on the same day and buys the top group and sells the bottom; with news for only 3 sectors, 8 slots are empty
+# and no ranking is possible; the original set had only XLK/XLC/XLY and hit this limit
 #
-# และเหตุผลที่ต้องรีบ: ข่าวย้อนหลังเก็บไม่ได้ ทุกวันที่ยังไม่ครบ = ข้อมูลหายถาวร
-# ส่วนฝั่งราคา/factor ย้อนหลังได้ตลอด จึงไม่ต้องรีบเท่า
+# And why it is urgent: news history cannot be collected later, so every incomplete day is data lost for good
+# Price and factor history can always be fetched later, so they are less urgent
 SECTOR_MEMBERS: dict[str, list[str]] = {
     "XLK": ["NVDA", "MSFT", "AAPL", "AVGO"],   # Technology
     "XLC": ["GOOGL", "META"],                  # Communication Services
@@ -89,61 +89,61 @@ SECTOR_MEMBERS: dict[str, list[str]] = {
 
 WATCHLIST: list[str] = sorted({t for members in SECTOR_MEMBERS.values() for t in members})
 
-# แผนที่ย้อนกลับ — ใช้ยุบข่าวรายตัวขึ้นไปเป็นระดับ sector
+# Reverse map, used to aggregate stock-level news to sector level
 TICKER_SECTOR: dict[str, str] = {
     ticker: sector for sector, members in SECTOR_MEMBERS.items() for ticker in members
 }
 
-# ตัวย่อที่บังเอิญเป็นคำปกติในภาษาอังกฤษ — **ห้ามจับข่าวจากตัวย่อ**
-# ให้จับจากชื่อบริษัทใน COMPANY_ALIASES อย่างเดียว
-#   CAT = แมว · KO = น็อกเอาต์ · GE/LIN = ส่วนของคำอื่น · PG = เรตหนัง/PG&E
-#   AMT = alternative minimum tax (คำที่โผล่ในข่าวการเงินบ่อย) · NEE = née
-# ไม่ใส่ META เพราะขอบเขตคำแก้ปัญหา "Metal/Metaverse" ได้แล้ว
-# และในข่าวการเงิน คำว่า Meta เดี่ยว ๆ แทบจะหมายถึงบริษัทเสมอ
+# Tickers that happen to be ordinary English words: **never match news on the ticker**
+# match only on the company names in COMPANY_ALIASES
+# CAT = a cat, KO = a knockout, GE/LIN = parts of other words, PG = a film rating or PG&E
+# AMT = alternative minimum tax (common in financial news), NEE = née
+# META is not listed because word boundaries already solve "Metal/Metaverse"
+# and in financial news a bare "Meta" almost always means the company
 AMBIGUOUS_SYMBOLS: set[str] = {"CAT", "KO", "GE", "LIN", "PG", "AMT", "NEE"}
 
 
 def all_tickers() -> list[str]:
-    """ทุก ticker ที่ต้องดึงราคา — ไม่ซ้ำ และเรียงเพื่อให้ผลลัพธ์ deterministic"""
+    """Every ticker to fetch prices for, deduplicated and sorted so results are deterministic"""
     return sorted({*BENCHMARKS, *SECTORS, *WATCHLIST})
 
 
 # --- Paper ledger ------------------------------------------------------------
-# กลยุทธ์ baseline ที่รันคู่ขนานไปตลอด เพื่อเป็นเส้นเปรียบเทียบที่เถียงไม่ได้
-# (ดู Journal note "10 - Background Track" → BG-2)
+# Baseline strategies that always run in parallel, as a comparison line nobody can argue with
+# (see the Journal note "10 - Background Track", BG-2)
 
 LEDGER_START_CAPITAL = 100_000.0
 
-# ticker ที่มีราคาน้อยกว่านี้ (≈4 ปี) ถือว่า "ยังไม่เคยดึงย้อนหลัง" → ดึง 10 ปีให้อัตโนมัติ
+# A ticker with fewer price rows than this (about 4 years) counts as never backfilled, and gets 10 years automatically
 PRICE_BACKFILL_MIN_ROWS = 1000
 
-# 12-1 momentum จะเลือกจากกลุ่มนี้ (sector rotation แบบคลาสสิก)
+# 12-1 momentum picks from this group (classic sector rotation)
 MOMENTUM_POOL: list[str] = list(SECTORS)
 MOMENTUM_TOP_N = 3
 
 # --- News --------------------------------------------------------------------
-# GDELT DOC 2.0 API ใช้ฟรี ไม่ต้องมี API key — เหมาะกับการเริ่มวันแรก
-# แต่เขาขอให้ยิงไม่เกิน 1 request ทุก 5 วินาที เราจึงต้อง throttle
+# The GDELT DOC 2.0 API is free and needs no API key, which suits day one
+# but it asks for at most 1 request every 5 seconds, so we throttle
 GDELT_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
-GDELT_MAX_RECORDS = 250          # ขอทีละเยอะ ๆ จะได้ยิง request น้อยครั้ง
+GDELT_MAX_RECORDS = 250          # Ask for many results at once, so fewer requests are needed
 GDELT_TIMEOUT_SEC = 45
 
-# บทเรียนจากการทดสอบจริง: GDELT เข้มกว่าที่เอกสารบอกมาก
-# ยิงถี่แม้เว้น 6 วินาทีก็ยังโดน 429 และเมื่อโดนแล้วจะติด "penalty box" นานพอควร
-# → เว้นห่างไว้ก่อน ดีกว่าโดนแบนแล้วไม่ได้ข้อมูลเลย
+# Lesson from real tests: GDELT is much stricter than its documentation says
+# frequent requests get 429 even 6 seconds apart, and once limited you stay in the "penalty box" for a while
+# so keep a wide gap; better than being banned and getting no data at all
 GDELT_MIN_INTERVAL_SEC = 15.0
 
-# เพดานเวลาของงานเก็บข่าว — งานที่ cron เรียกต้องจบภายในเวลาที่คาดเดาได้เสมอ
-# ถ้าเกิน ให้เก็บเท่าที่ได้แล้วจบ (พรุ่งนี้ค่อยเก็บใหม่ ไม่ใช่เรื่องคอขาดบาดตาย)
+# Time limit for news collection: a job called by cron must always finish in a predictable time
+# When it runs out, keep what was collected and stop (collect again tomorrow; nothing critical is lost)
 GDELT_TIME_BUDGET_SEC = 240.0
 
-# โดน 429 แล้วลองใหม่แค่ครั้งเดียว — เพราะนี่คืองานรายวัน
-# พลาดไปวันนึงเสียหายน้อยกว่าการปล่อยให้ job ค้างครึ่งชั่วโมง
+# After a 429, retry only once, because this is a daily job
+# missing one day does less harm than a job hanging for half an hour
 GDELT_RETRY_ON_LIMIT = 1
 GDELT_BACKOFF_SEC = 30.0
 
-# รวมหลายคำเข้าเป็น query เดียวด้วย OR เพื่อลดจำนวน request
-# (GDELT คิด rate limit ต่อ request ไม่ใช่ต่อจำนวนผลลัพธ์)
+# Combine several terms into one query with OR to cut the number of requests
+# (GDELT counts the rate limit per request, not per result)
 NEWS_QUERIES: list[str] = [
     '("federal reserve" OR "interest rate" OR inflation OR CPI) (stocks OR market)',
     '("stock market" OR "S&P 500" OR Nasdaq) (rally OR selloff OR record OR correction)',
@@ -151,18 +151,18 @@ NEWS_QUERIES: list[str] = [
 ]
 
 
-# --- แหล่งข่าว: เปิดใช้แหล่งไหนบ้าง ------------------------------------------
-# เรียงจากเร็ว/เชื่อถือได้มากที่สุด ไปหาช้าที่สุด
-# ตัดแหล่งไหนออกก็แค่ลบชื่อออกจาก list นี้
+# --- News sources: which ones are enabled ------------------------------------------
+# Ordered from fastest and most reliable to slowest
+# To drop a source, remove its name from this list
 #
-# ฉบับสาธารณะไม่มีแหล่ง yahoo และ gnews เพราะ robots.txt ของ query1/query2.finance.yahoo.com
-# และ news.google.com ไม่อนุญาตให้บอตอ่าน (ตรวจ 2026-11-25) ดู README หัวข้อแหล่งข้อมูล
+# The public edition has no yahoo or gnews source, because robots.txt of query1/query2.finance.yahoo.com
+# and news.google.com does not allow bots (checked 2026-11-25); see the data sources section of the README
 NEWS_SOURCES: list[str] = ["rss", "sec", "gdelt"]
 
-# ชื่อบริษัทที่ข่าวมักใช้แทน ticker — ใช้จับคู่ข่าวกับหุ้นจากพาดหัว
-# จับด้วยขอบเขตคำ (\b) ไม่ใช่ substring — ดู tag_tickers()
-# สำหรับ ticker ใน AMBIGUOUS_SYMBOLS นี่คือ**ทางเดียว**ที่จะจับข่าวได้
-# จึงต้องใส่ให้ครบทุกวิธีเขียนที่พบจริง (มี/ไม่มี &, มี/ไม่มียัติภังค์)
+# Company names that news uses instead of tickers, for matching headlines to stocks
+# Matched on word boundaries (\b), not substrings; see tag_tickers()
+# For tickers in AMBIGUOUS_SYMBOLS this is the **only** way news gets matched,
+# so it must include every spelling seen in practice (with and without &, with and without hyphens)
 COMPANY_ALIASES: dict[str, str] = {
     # Technology
     "Nvidia": "NVDA",
@@ -213,8 +213,8 @@ COMPANY_ALIASES: dict[str, str] = {
 }
 
 # --- RSS ---------------------------------------------------------------------
-# ไม่ต้องมี API key แทบไม่มี rate limit และมาตรฐานไม่เปลี่ยนมา 20 ปี
-# kind="primary" คือแหล่งต้นทาง (ประกาศจริง) ไม่ใช่การรายงานของนักข่าว
+# No API key, almost no rate limit, and a standard that has not changed in 20 years
+# kind="primary" marks an original source (the actual announcement), not a journalist's report
 RSS_FEEDS: list[dict[str, str]] = [
     {"name": "cnbc", "kind": "outlet",
      "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html"},
@@ -226,23 +226,23 @@ RSS_FEEDS: list[dict[str, str]] = [
 RSS_MAX_PER_FEED = 40
 
 # --- SEC EDGAR ---------------------------------------------------------------
-# SEC บังคับให้ User-Agent เป็น "ชื่อ อีเมล" ที่ติดต่อได้จริง ไม่งั้น HTTP 403
-# ตั้งเองผ่านตัวแปรแวดล้อม เช่น export FINBG_SEC_USER_AGENT="your-project you@your-domain.com"
+# The SEC requires a User-Agent of "name email" with a reachable address, otherwise HTTP 403
+# Set it yourself through an environment variable, e.g. export FINBG_SEC_USER_AGENT="your-project you@your-domain.com"
 SEC_USER_AGENT = os.environ.get("FINBG_SEC_USER_AGENT", "").strip()
-SEC_MIN_INTERVAL_SEC = 0.15      # SEC อนุญาต ~10 req/s เราเว้นเผื่อไว้
+SEC_MIN_INTERVAL_SEC = 0.15      # The SEC allows about 10 requests per second; we keep a margin
 
-# เอาเฉพาะฟอร์มที่บอก "เหตุการณ์" จริง
-# ตัด Form 3/4/5 (ซื้อขายของผู้บริหาร) ออกเพราะมีเยอะและส่วนใหญ่ตามแผนที่ตั้งไว้ล่วงหน้า
+# Only forms that report real events
+# Forms 3/4/5 (insider trades) are left out because they are numerous and mostly pre-planned
 SEC_FORMS: set[str] = {"8-K", "10-Q", "10-K", "S-1", "DEF 14A", "SC 13D", "SC 13G"}
 
-# หัวข้อของ 8-K (Item) — ตัวบอกว่า filing นั้น "เรื่องอะไร" โดยไม่ต้องเปิดอ่าน
-# เดิมพาดหัว 8-K เป็นแค่ "[8-K] TSLA — 8-K" ทำให้ตอน label ต้องเดาว่าเป็น neutral
-# ทั้งที่ SEC บอกหัวข้อมาให้แล้วในฟิลด์ items ของ submissions JSON
+# 8-K items: they say what a filing is about without opening it
+# 8-K headlines used to be just "[8-K] TSLA — 8-K", so labelling had to guess neutral
+# even though the SEC already gives the items in the submissions JSON
 #
-# ระดับความรุนแรง (ใช้ตอนเฝ้าระวัง):
-#   critical — เหตุการณ์ที่เปลี่ยนภาพบริษัททันที ต้องวางแผนใหม่
-#   high     — สำคัญ ควรทบทวนถ้าถือหุ้นตัวนั้นอยู่
-#   info     — บันทึกไว้ให้แผนรายสัปดาห์อ่าน ไม่ต้องปลุกใคร
+# Severity levels (used by the watch):
+# critical: an event that changes the picture of the company at once; replan
+# high: important; review it if we hold the stock
+# info: logged for the weekly plan to read; no need to wake anyone
 SEC_8K_ITEMS: dict[str, tuple[str, str]] = {
     "1.01": ("ทำสัญญาสำคัญ", "info"),
     "1.02": ("ยกเลิกสัญญาสำคัญ", "high"),
@@ -271,10 +271,10 @@ SEC_8K_ITEMS: dict[str, tuple[str, str]] = {
 
 
 def watchlist_news_query() -> str:
-    """รวม watchlist ทั้งหมดเป็น query เดียว แทนที่จะยิงทีละตัว
+    """Combine the whole watchlist into one query instead of one request per ticker.
 
-    8 ticker = 8 requests ตอนแรก → เหลือ 1 request
-    เราจับคู่ว่าข่าวไหนเกี่ยวกับ ticker ไหนทีหลังจากพาดหัวได้เอง (ฟรี)
+    8 tickers meant 8 requests at first; now it is 1 request.
+    Which story belongs to which ticker is worked out afterwards from the headline (free).
     """
     tickers = " OR ".join(f'"{t}"' for t in WATCHLIST)
     return f"({tickers}) (stock OR shares OR earnings)"
@@ -282,9 +282,9 @@ def watchlist_news_query() -> str:
 USER_AGENT = "finbg-research/0.1 (personal research; contact via github)"
 
 # --- Work queue (L4) ---------------------------------------------------------
-# รายการอ่านจากโน้ต "08 - LLM x Quant Frontier"
-# ใช้เป็น "ที่ทิ้ง token" ที่ปลอดภัย: ไม่เร่งด่วน แต่ไม่มีวันเสียเปล่า
-# และเป็นงานที่ทำย้อนหลังได้ → จึงอยู่ท้ายบันไดความสำคัญ
+# Reading list from the note "08 - LLM x Quant Frontier"
+# Used as a safe place to spend spare tokens: not urgent, but never wasted
+# and it can be done at any time later, so it sits at the bottom of the priority ladder
 
 PAPERS: list[dict[str, str]] = [
     {"id": "finsaber", "title": "Can LLM-based Financial Investing Strategies Outperform the Market in Long Run?",
@@ -314,69 +314,69 @@ PAPERS: list[dict[str, str]] = [
 PAPER_NOTES = JOURNAL / "Papers"
 
 # --- Labeling ----------------------------------------------------------------
-# โมเดลที่ตั้งใจใช้ label ทั้งคลัง — บันทึกไว้เพื่อให้ตรวจ drift ได้
-# ความสม่ำเสมอสำคัญกว่าคุณภาพสูงสุด: คลังที่ปนหลายโมเดลจะมีรอยต่อ
-# ที่หน้าตาเหมือนสัญญาณตลาดจริง ทั้งที่เป็นแค่การเปลี่ยนโมเดล
+# The model meant to label the whole corpus, recorded so drift can be checked
+# Consistency matters more than top quality: a corpus that mixes models has seams
+# that look like real market signals when they are only a change of model
 LABEL_MODEL = "claude-opus-5"
 
-# ระดับ effort ที่ตั้งใจใช้ — เป็นค่าที่ "ผู้ดูแลประกาศ" ไม่ใช่ค่าที่โมเดลรายงานเอง
-# (โมเดลมักไม่รู้แน่ชัดว่า session ตั้ง effort ไว้เท่าไหร่ การให้เดาจะได้ข้อมูลขยะ)
-# medium เพียงพอสำหรับงาน label ที่มี schema ชัดเจน และประหยัดโควตากว่า high
+# The intended effort level: a value the maintainer declares, not one the model reports
+# (a model usually does not know what effort the session was set to; asking it to guess gives junk)
+# medium is enough for labelling with a clear schema and uses less quota than high
 LABEL_EFFORT = "medium"
 
-# กรองก่อน label — เหตุผลเชิงปริมาณ:
-# cron เก็บข่าว ~546 รายการ/วัน = ~16,000/เดือน ซึ่ง label ไม่ทันไม่ว่าจะใช้โมเดลไหน
-# การกรองเหลือ ~67/วัน (~2,000/เดือน) ทำให้ยั่งยืน **และคลังคุณภาพดีขึ้น**
-# เพราะที่ตัดออกคือข่าวชวนคลิกและประกาศที่ไม่เกี่ยวกับ universe ของเรา
+# Filter before labelling, for reasons of volume:
+# cron collects about 546 items a day, about 16,000 a month, which no model can keep up with
+# Filtering down to about 67 a day (about 2,000 a month) makes it sustainable **and improves the corpus**,
+# because what gets cut is clickbait and announcements unrelated to our universe
 #
-# เกณฑ์: เป็นเอกสารต้นทาง (SEC filing, ประกาศธนาคารกลาง) **หรือ** ยืนยัน ticker ได้
-# ข่าวดิบยังเก็บครบเหมือนเดิม — กรองเฉพาะชั้น label เท่านั้น
+# Criterion: an original document (SEC filing, central bank release) **or** a confirmed ticker
+# Raw news is still stored in full; only the labelling layer is filtered
 LABEL_HIGH_SIGNAL_ONLY = True
 LABEL_PRIMARY_TYPES: set[str] = {"primary"}
 
-# โควตาต่อ (วันที่ข่าวออก, sector) — 11 sector + ถัง macro = สูงสุด ~72 ชิ้น/วัน
+# Quota per (publication date, sector): 11 sectors plus a macro bucket = at most about 72 items a day
 #
-# แก้ปัญหาที่วัดได้จากคลังจริง: label 105 ใบแรก มี AMZN/MSFT/AAPL/META กิน 67 จาก 98 ครั้ง
-# ต่อให้เพิ่ม ticker ครบ 11 sector แล้ว ข่าว big tech ก็ยังมีมากกว่ากลุ่มอื่นหลายเท่า
-# ถ้าไม่กำหนดเพดาน คลังจะกลายเป็น "ข่าว big tech" ไม่ใช่ cross-section ของตลาด
+# Fixes a problem measured in the real corpus: in the first 105 labels, AMZN/MSFT/AAPL/META took 67 of 98 slots
+# Even with tickers for all 11 sectors, big tech news still outnumbers the other groups several times over
+# Without a cap the corpus becomes "big tech news", not a cross-section of the market
 #
-# โมเดลจัดอันดับต้องการ **ความสมดุล** มากกว่าปริมาณ — 6 ชิ้นจาก 12 กลุ่ม
-# มีค่ากว่า 72 ชิ้นที่มาจาก 3 กลุ่ม ทั้งที่จำนวนเท่ากัน
+# A ranking model needs **balance** more than volume: 6 items from each of 12 groups
+# are worth more than 72 items from 3 groups, though the count is the same
 #
-# ตั้งเป็น 0 เพื่อปิดโควตา (กลับไปพฤติกรรมเดิม: label ทุกชิ้นที่ผ่านตัวกรอง)
+# Set to 0 to turn the quota off (the old behaviour: label everything that passes the filter)
 LABEL_SECTOR_QUOTA = 6
 
 
 # --- Google News RSS ---------------------------------------------------------
-# ไม่อยู่ในฉบับสาธารณะ: news.google.com ไม่อนุญาตให้บอตอ่าน (robots.txt, ตรวจ 2026-11-25)
+# Not in the public edition: news.google.com does not allow bots (robots.txt, checked 2026-11-25)
 
-# --- ปฏิทินงบ + ประมาณการของนักวิเคราะห์ --------------------------------------
-# yfinance Ticker.calendar ให้วันประกาศงบครั้งถัดไป + ค่าเฉลี่ย EPS/รายได้ที่นักวิเคราะห์คาด
-# ประมาณการแบบ point-in-time **ย้อนหลังหาฟรีไม่ได้** (ถูกเขียนทับทุกวัน)
-# จึงเก็บ snapshot ทุกวัน — วัตถุดิบของ factor "earnings surprise" ในอนาคต
+# --- Earnings calendar and analyst estimates --------------------------------------
+# yfinance Ticker.calendar gives the next earnings date plus consensus EPS and revenue estimates
+# Point-in-time estimate history **cannot be obtained for free** (it is overwritten daily)
+# so a snapshot is stored every day: the raw material for a future "earnings surprise" factor
 RAW_CALENDAR = RAW / "calendar"
 
-# --- งบการเงิน (SEC XBRL companyfacts) ----------------------------------------
-# ทุกตัวเลขมีวันที่ยื่นจริง (filed) = knowledge_date ในตัว → ไม่มี look-ahead
-# SEC เก็บย้อนหลังทั้งหมด จึงไม่ต้องเก็บ JSON ดิบ (4–8 MB ต่อบริษัท)
-# เก็บเฉพาะ concept ที่ใช้ ลงตารางเดียวต่อรอบ (เล็กมาก)
+# --- Financial statements (SEC XBRL companyfacts) ----------------------------------------
+# Every figure carries its real filing date (filed), a built-in knowledge_date, so there is no look-ahead
+# The SEC keeps the full history, so the raw JSON (4 to 8 MB per company) is not stored
+# Only the concepts in use are kept, in one small table per round
 RAW_FUNDAMENTALS = RAW / "fundamentals"
 FUNDAMENTALS_REFRESH_DAYS = 6
 
-# บริษัทที่เปลี่ยนนิติบุคคลผู้ยื่น (CIK) — ประวัติงบอยู่ใต้ CIK เก่า ต้องดึงทั้งสองแล้วรวมกัน
-# XOM: ปี 2026 ปรับโครงสร้างเป็นบริษัทโฮลดิ้ง "ExxonMobil Holdings Corp" (CIK 0002115436)
-# ซึ่งเพิ่งยื่น 10-Q ฉบับเดียว — ประวัติทั้งหมดอยู่ที่ Exxon Mobil Corporation (CIK 0000034088)
-# พบเมื่อ 2026-10-24: งบ XOM ว่างทั้งแถว เพราะ ticker ชี้ไป CIK ใหม่แล้ว
+# Companies that changed the filing entity (CIK): the history sits under the old CIK, so fetch both and merge
+# XOM: restructured in 2026 into the holding company "ExxonMobil Holdings Corp" (CIK 0002115436),
+# which has filed only one 10-Q; the whole history is under Exxon Mobil Corporation (CIK 0000034088)
+# Found 2026-10-24: XOM's financials row was empty because the ticker now pointed to the new CIK
 SEC_PREDECESSOR_CIKS: dict[str, list[str]] = {
     "XOM": ["0000034088"],
-}   # ดึงใหม่เมื่อเก่ากว่านี้ หรือมี 10-Q/10-K ใหม่ของ watchlist
+}   # Refetch when older than this, or when a new 10-Q/10-K for the watchlist arrives
 FUNDAMENTAL_FORMS: set[str] = {"10-Q", "10-K", "10-Q/A", "10-K/A", "10-KT"}
 
-# metric → รายชื่อ concept ที่ลองตามลำดับ (บริษัทต่างกันใช้ชื่อต่างกัน — ธนาคารต่างมาก)
+# metric -> concept names tried in order (companies use different names; banks differ the most)
 FUNDAMENTAL_CONCEPTS: dict[str, list[tuple[str, str, str]]] = {
-    # revenue เลือก "ตัวที่ใหญ่ที่สุดในบรรดาที่สดอยู่" (ดู fundamentals._pick_concept)
-    # เพราะบางบริษัทแท็กทั้งยอดรวมและยอดย่อย เช่น AMT: Revenues = รวม,
-    # RevenueFromContract... = แค่ส่วนบริการ — ยอดรวมไม่มีทางเล็กกว่าส่วนย่อย
+    # For revenue, pick "the largest among the fresh ones" (see fundamentals._pick_concept)
+    # because some companies tag both the total and a subtotal, e.g. AMT: Revenues = total,
+    # RevenueFromContract... = services only; a total can never be smaller than a part
     "revenue": [
         ("us-gaap", "Revenues", "USD"),
         ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax", "USD"),
@@ -396,7 +396,7 @@ FUNDAMENTAL_CONCEPTS: dict[str, list[tuple[str, str, str]]] = {
     "cfo": [("us-gaap", "NetCashProvidedByUsedInOperatingActivities", "USD")],
     "capex": [
         ("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment", "USD"),
-        ("us-gaap", "PaymentsToAcquireProductiveAssets", "USD"),     # NVDA, AMZN ใช้ชื่อนี้
+        ("us-gaap", "PaymentsToAcquireProductiveAssets", "USD"),     # NVDA and AMZN use this name
     ],
     "equity": [
         ("us-gaap", "StockholdersEquity", "USD"),
@@ -413,177 +413,177 @@ FUNDAMENTAL_CONCEPTS: dict[str, list[tuple[str, str, str]]] = {
     "shares_out": [("dei", "EntityCommonStockSharesOutstanding", "shares")],
     "diluted_shares": [("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding", "shares")],
 }
-# metric ที่เป็น "ยอดสะสมช่วงเวลา" (งบกำไรขาดทุน/กระแสเงินสด) — ต้องแปลงเป็นรายไตรมาสก่อนรวม TTM
+# Metrics that are period totals (income statement, cash flow) must be converted to quarters before summing TTM
 FUNDAMENTAL_FLOWS: set[str] = {
     "revenue", "net_income", "eps_diluted", "operating_income",
     "gross_profit", "cfo", "capex", "diluted_shares",
 }
 
-# --- Portfolio Manager: แผนรายสัปดาห์ (ดูโน้ต 11) -------------------------------
-# LLM ไม่ได้เทรด — มันเขียน "แผน" ที่โค้ดตรวจและนำไปรันเป็นพอร์ตกระดาษ
-# กติกาทั้งหมดอยู่ที่นี่ในโค้ด ไม่ใช่ในพรอมต์ เพราะโมเดลแก้โค้ดไม่ได้แต่เถียงพรอมต์ได้
-PLANS = DATA / "plans"                 # แผนที่ผ่านการตรวจ — สร้างย้อนหลังไม่ได้ ต้องสำรอง
-PLAN_REQUESTS = PLANS / "requests"     # พรอมต์ที่ส่งจริงทุกครั้ง = หลักฐานว่าแผนรู้อะไร
+# --- Portfolio Manager: weekly plan (see note 11) -------------------------------
+# The LLM does not trade: it writes a "plan" that code checks and runs as a paper portfolio
+# Every rule lives here in code, not in the prompt, because the model cannot edit code but can argue with a prompt
+PLANS = DATA / "plans"                 # Plans that passed the checks cannot be recreated later, so back them up
+PLAN_REQUESTS = PLANS / "requests"     # The prompt actually sent each time: the record of what the plan knew
 JOURNAL_PLANS = JOURNAL / "Plans"
 
-# โมเดลล็อกตายตัว เหตุผลเดียวกับ LABEL_MODEL: ถ้าเปลี่ยนโมเดลกลางทาง ผลงานของ PM
-# จะมีรอยต่อที่แยกไม่ออกว่าเป็นฝีมือหรือเป็นแค่การเปลี่ยนสมอง
+# The model is pinned, for the same reason as LABEL_MODEL: switching models midway would leave a seam
+# in the PM's track record that cannot be told apart from skill
 PLAN_MODEL = "claude-opus-5-5"
-PLAN_EFFORT = "high"                   # งานสัปดาห์ละครั้ง คุ้มที่จะให้คิดลึก
+PLAN_EFFORT = "high"                   # A once-a-week job, worth letting it think deeply
 PLAN_TIMEOUT_SEC = 1800
-PLAN_MAX_BUDGET_USD = 8.0              # เพดานกันหลุด (บน Pro เป็นตัวเลขเทียบเท่า ไม่ได้ตัดเงินจริง)
-PLAN_MAX_ATTEMPTS = 2                  # แผนไม่ผ่านการตรวจ → ส่งข้อผิดพลาดกลับให้แก้ได้อีก 1 ครั้ง
+PLAN_MAX_BUDGET_USD = 8.0              # Spending cap as a safeguard (on Pro it is an equivalent figure, not real money)
+PLAN_MAX_ATTEMPTS = 2                  # A plan that fails the checks gets its errors back and one more try
 
-# ช่วงเวลาออกแผน (เวลาไทย): ตั้งแต่เช้าวันเสาร์ หลังตลาดวันศุกร์ปิดและข้อมูลเข้าแล้ว
-# ถ้าเครื่องปิดทั้งสุดสัปดาห์ แผนจะออกตอนเปิดเครื่องครั้งแรก (ยังทันก่อนตลาดเปิดวันจันทร์)
-PLAN_WINDOW_WEEKDAY = 5                # 5 = เสาร์
+# Plan window (Thai time): from Saturday morning, after Friday's close and once the data is in
+# If the machine is off all weekend, the plan is issued at the first start-up (still before Monday's open)
+PLAN_WINDOW_WEEKDAY = 5                # 5 = Saturday
 PLAN_WINDOW_HOUR = 5
 
-# --- Mandate: กรอบที่ PM ขยับได้ -----------------------------------------------
-# แกน (core) เป็นกฎตายตัวที่ทดสอบย้อนหลังได้ · LLM คุมเฉพาะส่วน satellite
-# แบบนี้วัดได้ตรง ๆ ว่า "ส่วนที่ LLM ตัดสินใจ" เพิ่มหรือลดค่า โดยเทียบกับ control
-# ที่ถือ satellite แบบเฉย ๆ (PM_PASSIVE_SATELLITE) บนตารางปรับพอร์ตเดียวกันทุกประการ
+# --- Mandate: what the PM may change -----------------------------------------------
+# The core is a fixed, backtestable rule; the LLM controls only the satellite
+# That way the value added or lost by the LLM's decisions is measured directly against a control
+# that holds the satellite passively (PM_PASSIVE_SATELLITE) on exactly the same rebalancing schedule
 PM_CORE_WEIGHT = 0.70
 PM_CORE_MIX: dict[str, float] = {"SPY": 0.60, "AGG": 0.40}
 PM_PASSIVE_SATELLITE: dict[str, float] = {"SPY": 1.0}
 
-# ตัวที่ satellite ถือได้ — ETF ดัชนี/พันธบัตร/ทอง + ETF รายหมวด + หุ้นใน watchlist
+# What the satellite may hold: index, bond and gold ETFs, sector ETFs, and watchlist stocks
 PM_BROAD_ETFS: set[str] = {"SPY", "QQQ", "IWM", "AGG", "TLT", "GLD"}
 PM_SATELLITE_UNIVERSE: list[str] = sorted({*PM_BROAD_ETFS, *SECTORS, *WATCHLIST})
 
-# เพดานต่อตัว (สัดส่วนของ satellite) — satellite = 30% ของพอร์ต
-#   ETF ดัชนี 100% (= ถือ SPY ทั้งก้อนได้ = control) · ETF หมวด 40% (= 12% ของพอร์ต)
-#   หุ้นรายตัว 25% (= 7.5% ของพอร์ต) — ตัวเดียวพังไม่ทำให้พอร์ตพัง
+# Cap per holding (as a share of the satellite); the satellite is 30% of the portfolio
+# Index ETFs 100% (holding all SPY is allowed, which equals the control); sector ETFs 40% (12% of the portfolio)
+# Single stocks 25% (7.5% of the portfolio), so one blow-up cannot sink the portfolio
 PM_CAP_BROAD = 1.00
 PM_CAP_SECTOR = 0.40
 PM_CAP_STOCK = 0.25
 PM_MAX_POSITIONS = 10
 
-# turnover ต่อแผน (ขาเดียว = ผลรวมของส่วนที่เพิ่มขึ้น) — กัน "action flipping" ที่งานวิจัยพบ
-# 0.5 = เปลี่ยน satellite ได้ครึ่งเดียวต่อครั้ง (15% ของพอร์ต) · ต่ำกว่า PM_MIN_CHANGE ถือว่าไม่เปลี่ยน
+# Turnover per plan (one side = sum of the increases), to prevent the "action flipping" found in research
+# 0.5 = half the satellite may change per plan (15% of the portfolio); changes below PM_MIN_CHANGE count as none
 PM_MAX_TURNOVER = 0.50
 PM_MIN_CHANGE = 0.02
 
-# ต้นทุนซื้อขาย (ค่าคอม + spread + slippage) ต่อมูลค่าที่ซื้อขาย — ETF/หุ้นใหญ่ ประมาณการแบบระมัดระวัง
+# Trading cost (commission + spread + slippage) per traded value; a conservative estimate for ETFs and large caps
 PM_COST_BPS = 10.0
 
-# คำทำนายในแผน — อย่างน้อย 1 ข้อทุกแผน เพื่อวัด calibration ได้
+# Predictions in the plan: at least one per plan, so calibration can be measured
 PM_MIN_PREDICTIONS = 1
 PM_MAX_PREDICTIONS = 5
 PM_PREDICTION_MIN_DAYS = 5
 PM_PREDICTION_MAX_DAYS = 92
 
-# --- Alerts: เฝ้าระวังข่าว/ราคาแรง -------------------------------------------
+# --- Alerts: watch for strong news and price moves -------------------------------------------
 ALERTS = DATA / "alerts"
 JOURNAL_ALERTS = JOURNAL / "Alerts"
 
-# ราคา: z = ผลตอบแทนวันนี้ / ความผันผวนรายวัน 60 วัน
+# Price: z = today's return / 60-day daily volatility
 ALERT_SHOCK_Z = 3.0
-ALERT_SHOCK_MIN_MOVE = {"stock": 4.0, "etf": 2.0}     # % ขั้นต่ำ กันหุ้นนิ่งมากแกว่งนิดเดียวก็ z สูง
-ALERT_MARKET_MOVE = 2.5                                # SPY ขยับเกินนี้ (%) ในวันเดียว
+ALERT_SHOCK_MIN_MOVE = {"stock": 4.0, "etf": 2.0}     # Minimum %, so a very quiet stock does not get a high z from a tiny move
+ALERT_MARKET_MOVE = 2.5                                # SPY moves more than this (%) in one day
 ALERT_VIX_LEVEL = 30.0
-ALERT_VIX_JUMP = 30.0                                  # VIX พุ่งเกินนี้ (%) ในวันเดียว
-ALERT_LABEL_MATERIALITY = 75                           # label ข่าวที่ถือว่า "แรง"
+ALERT_VIX_JUMP = 30.0                                  # VIX jumps more than this (%) in one day
+ALERT_LABEL_MATERIALITY = 75                           # News labels that count as "strong"
 
-# --- ความผันผวนรุนแรง → เรียก Claude มาสืบสาเหตุ (finbg/pm/volatility.py) ---------
-# รันวันละครั้งหลังเก็บข้อมูล (morning.sh) · 0 token ถ้าไม่มีอะไรผิดปกติ
-# z = ผลตอบแทน / ความผันผวนปกติ — ความผันผวนปกติคิดจาก 120 วันทำการ "ก่อน" ช่วงเหตุการณ์
-# (ตัด 5 วันล่าสุดออก ไม่ให้เหตุการณ์ไปเพิ่มฐานของตัวเองจนดูไม่ผิดปกติ)
-# ต้องผ่านทั้ง z และ % ขั้นต่ำ: หุ้นนิ่งมาก (เช่น KO) แกว่ง 2% ก็ได้ z สูง แต่ไม่ใช่เรื่องรุนแรง
+# --- Violent moves: ask the LLM to investigate the cause (finbg/pm/volatility.py) ---------
+# Runs once a day after data collection (morning.sh); 0 tokens when nothing is unusual
+# z = return / normal volatility, where normal volatility comes from the 120 trading days before the event window
+# (the latest 5 days are excluded, so an event does not inflate its own baseline until it looks normal)
+# Both z and the minimum % must pass: a very quiet stock (e.g. KO) gets a high z from a 2% move that is not serious
 VOL_LOOKBACK = 120
 VOL_DAILY_Z = 3.5
-VOL_DAILY_MIN_MOVE = {"stock": 5.0, "etf": 2.5}       # % ในวันเดียว
+VOL_DAILY_MIN_MOVE = {"stock": 5.0, "etf": 2.5}       # % in a single day
 VOL_WEEK_Z = 3.0
-VOL_WEEK_MIN_MOVE = {"stock": 10.0, "etf": 5.0}       # % สะสม 5 วันทำการ (จับการไหลลงต่อเนื่อง)
-VOL_COOLDOWN_SESSIONS = 5          # หุ้นตัวเดิมไม่สืบซ้ำภายในนี้ เว้นแต่มีวันที่แรงกว่าเดิม
-VOL_MAX_TICKERS = 6                # ต่อการสืบหนึ่งครั้ง (รวมเป็นเซสชันเดียว ประหยัดโควตา)
+VOL_WEEK_MIN_MOVE = {"stock": 10.0, "etf": 5.0}       # % cumulative over 5 trading days (catches a steady slide)
+VOL_COOLDOWN_SESSIONS = 5          # The same stock is not investigated again within this window unless a stronger day comes
+VOL_MAX_TICKERS = 6                # Per investigation (bundled into one session to save quota)
 VOL_MAX_SESSIONS_PER_WEEK = 4
 INVESTIGATIONS = DATA / "investigations"
 JOURNAL_INVESTIGATIONS = JOURNAL / "Investigations"
 INVESTIGATE_EFFORT = "high"
 
-# วางแผนใหม่อัตโนมัติเมื่อมี alert ระดับ critical/high — มีเพดานกันวนลูปเผาโควตา
+# Replan automatically on a critical or high alert, with a cap to stop a loop from burning quota
 REPLAN_MAX_PER_WEEK = 2
 REPLAN_MIN_HOURS_APART = 12
 
-# --- การแจ้งเตือน ------------------------------------------------------------
-# ค่าเริ่มต้น = แจ้งบนเดสก์ท็อปเท่านั้น (notify-send) ไม่ส่งอะไรออกนอกเครื่อง
-# อยากได้บนมือถือ: `uv run finbg notify setup` (ntfy.sh) — ข้อความจะผ่านเซิร์ฟเวอร์สาธารณะ
-# และใครรู้ชื่อ topic ก็อ่านได้ จึงให้ผู้ใช้เปิดเองโดยตั้งใจเท่านั้น
+# --- Notifications ------------------------------------------------------------
+# Default: desktop notifications only (notify-send); nothing leaves the machine
+# For phone alerts: `uv run finbg notify setup` (ntfy.sh); messages then pass through a public server
+# and anyone who knows the topic name can read them, so the user has to turn it on deliberately
 NOTIFY_CONFIG = Path.home() / ".config" / "finbg" / "notify.json"
 NTFY_SERVER = "https://ntfy.sh"
 
 
-# --- สแกนทั้งตลาดหาโอกาสที่คนมองข้าม (finbg/scan · โน้ต 12) ------------------------
-# กรวย 4 ชั้น: โค้ดเก็บทั้งตลาด → โค้ดให้คะแนน → Sonnet คัดกรอง → Opus ดำลึก
-# ผู้ใช้เลือก (2026-10-25): หุ้นสหรัฐที่มีสภาพคล่องทั้งหมด · ดำลึก ≤ 5 ไอเดีย/วัน · พอร์ตไอเดียแยกจาก PM
-RAW_SCREENER = RAW / "screener"            # snapshot ราคา/มูลค่าตลาดของทั้งตลาด (ย้อนหลังไม่ได้)
-RAW_SEC_INDEX = RAW / "sec_index"          # รายการ filing ทั้งหมดของ SEC ต่อวัน
-RAW_INSIDER = RAW / "insider"              # Form 4 ที่แยกรายการแล้ว
-RAW_EARNINGS = RAW / "earnings_calendar"   # ปฏิทินงบทั้งตลาด + EPS จริง/คาด + จำนวนนักวิเคราะห์
-OPPORTUNITIES = DATA / "opportunities"     # ไอเดีย กลุ่มควบคุม ผลลัพธ์ — สร้างย้อนหลังไม่ได้
+# --- Whole-market scan for overlooked opportunities (finbg/scan, note 12) ------------------------
+# A 4-stage funnel: code collects the whole market, code scores, Sonnet screens, Opus digs deep
+# Owner's choice (2026-10-25): all liquid US stocks, at most 5 deep dives a day, an idea portfolio separate from the PM
+RAW_SCREENER = RAW / "screener"            # Price and market-cap snapshot of the whole market (cannot be collected later)
+RAW_SEC_INDEX = RAW / "sec_index"          # Every SEC filing of the day
+RAW_INSIDER = RAW / "insider"              # Parsed Form 4 transactions
+RAW_EARNINGS = RAW / "earnings_calendar"   # Whole-market earnings calendar, actual and estimated EPS, number of analysts
+OPPORTUNITIES = DATA / "opportunities"     # Ideas, control group, results: cannot be recreated later
 JOURNAL_OPPORTUNITIES = JOURNAL / "Opportunities"
 
-# Nasdaq screener และปฏิทินงบ: ไม่อยู่ในฉบับสาธารณะ เพราะ robots.txt ของ api.nasdaq.com
-# ไม่อนุญาตให้บอตอ่าน (ตรวจ 2026-11-25) ดู finbg/scan/universe.py และ finbg/datasource.py
+# Nasdaq screener and earnings calendar: not in the public edition, because robots.txt of api.nasdaq.com
+# does not allow bots (checked 2026-11-25); see finbg/scan/universe.py and finbg/datasource.py
 
-# universe: ซื้อขายได้จริงสำหรับรายย่อย — หุ้นจิ๋วตัดออก (spread กว้าง ต้นทุนกินกำไรหมด)
+# Universe: stocks a retail investor can really trade; micro caps are cut (wide spreads eat the profit)
 SCAN_MIN_MCAP = 300e6
-SCAN_MIN_DOLLAR_VOLUME = 2e6               # มัธยฐาน 20 วัน (ถ้ามี) ไม่งั้นใช้ของวันนั้น
-SCAN_BACKFILL_PER_RUN = 600                # ดึงประวัติราคาให้ตัวใหม่ได้สูงสุดเท่านี้ต่อรอบ
+SCAN_MIN_DOLLAR_VOLUME = 2e6               # 20-day median if available, otherwise that day's value
+SCAN_BACKFILL_PER_RUN = 600                # Fetch price history for at most this many new tickers per round
 
-SCAN_CANDIDATES = 30                       # ชั้น 1 → ชั้น 2 (Sonnet อ่าน)
-SCAN_DEEP_DIVES = 5                        # ชั้น 2 → ชั้น 3 (Opus ดำลึก) — งบที่ผู้ใช้อนุมัติ
+SCAN_CANDIDATES = 30                       # Stage 1 -> stage 2 (read by Sonnet)
+SCAN_DEEP_DIVES = 5                        # Stage 2 -> stage 3 (Opus deep dive): the budget the owner approved
 TRIAGE_MODEL = "claude-sonnet-5-5"
 TRIAGE_EFFORT = "medium"
 DEEP_DIVE_EFFORT = "high"
 INSIDER_LOOKBACK_DAYS = 10
 INSIDER_CLUSTER_MIN_BUYERS = 2
-INSIDER_CLUSTER_MIN_VALUE = 100_000        # ดอลลาร์ รวมทุกคนในช่วง lookback
+INSIDER_CLUSTER_MIN_VALUE = 100_000        # Dollars, summed over everyone in the lookback
 INSIDER_SINGLE_BIG_BUY = 250_000
-INSIDER_HOLDER_BIG_BUY = 1_000_000         # ผู้ถือเกิน 10% (กองทุน) ซื้อเพิ่มในตลาด
+INSIDER_HOLDER_BIG_BUY = 1_000_000         # Holders above 10% (funds) buying more in the market
 
-# พอร์ตไอเดีย (paper) — ทุกไอเดียถือเท่ากัน ระยะเวลาเท่ากัน ตั้งกติกาไว้ก่อนเห็นผล
+# Idea portfolio (paper): every idea held equally for the same period, rules fixed before seeing results
 IDEA_HOLD_SESSIONS = 20
-IDEA_COST_BPS = 30.0                       # ไป-กลับ — หุ้นกลาง/เล็กแพงกว่าหุ้นใหญ่
-IDEA_SMALL_CAP_BENCHMARK = "IWM"           # มูลค่าตลาด < IDEA_LARGE_CAP → เทียบ IWM
+IDEA_COST_BPS = 30.0                       # Round trip; mid and small caps cost more than large caps
+IDEA_SMALL_CAP_BENCHMARK = "IWM"           # Market cap < IDEA_LARGE_CAP -> compare with IWM
 IDEA_LARGE_CAP = 10e9
 IDEA_LARGE_CAP_BENCHMARK = "SPY"
-IDEA_GATE_MIN_RESOLVED = 100               # ตัดสินว่ามี edge ไหม เมื่อมีไอเดียครบเท่านี้
+IDEA_GATE_MIN_RESOLVED = 100               # Decide whether there is an edge once this many ideas exist
 
-# การทดสอบรอง (ตั้ง 2026-11-08 ก่อนผู้เข้ารอบตัวแรกครบ 20 วัน ~2026-11-24 · โน้ต 12)
-# "คะแนน triage ของ Sonnet เรียงผู้เข้ารอบได้ตรงกับผลจริงไหม" — ใช้ผู้เข้ารอบทุกตัว (~30/วัน) ไม่ใช่แค่ ~1 ไอเดีย/วัน
-# จึงไวกว่าการทดสอบหลักมาก · ไม่แตะเกณฑ์ของการทดสอบหลัก
-TRIAGE_IC_MIN_NAMES = 10                   # ต่อรอบ — น้อยกว่านี้ correlation เป็น noise
-TRIAGE_IC_GATE_SESSIONS = 60               # ตัดสินเมื่อมีรอบที่คิดผลได้ครบเท่านี้ (~3 เดือน)
-TRIAGE_IC_EXTEND_SESSIONS = 120            # ถ้าครบ 60 แล้วเป็นบวกแต่ t < 2 → เก็บต่อถึงเท่านี้ แล้วตัดสินครั้งสุดท้าย
-TRIAGE_IC_NW_LAG = IDEA_HOLD_SESSIONS - 1  # ผลของรอบติดกันซ้อนทับกัน 19 วัน → t แบบ Newey-West
+# Secondary test (set 2026-11-08, before the first finalist reached 20 days around 2026-11-24; note 12)
+# "Does Sonnet's triage score rank the finalists in line with the real outcome?" uses every finalist (about 30 a day), not just about 1 idea a day,
+# so it is much more sensitive than the main test; it does not touch the main test's criteria
+TRIAGE_IC_MIN_NAMES = 10                   # Per round; with fewer, the correlation is noise
+TRIAGE_IC_GATE_SESSIONS = 60               # Decide once this many rounds have results (about 3 months)
+TRIAGE_IC_EXTEND_SESSIONS = 120            # If positive at 60 but t < 2, keep collecting up to this many, then decide for the last time
+TRIAGE_IC_NW_LAG = IDEA_HOLD_SESSIONS - 1  # Consecutive rounds overlap by 19 days, hence a Newey-West t
 
-# --- แทร็กไทย (finbg/th · finlab/thai.py · โน้ต 13) ---------------------------------
-# ผู้ใช้เลือก 2026-11-08: เปิดแทร็กไทยแยกจากการทดลอง US ทั้งหมด (ไม่ปนเกณฑ์ ไม่ปนพอร์ต)
-# ขั้น 1 = เก็บข้อมูลแบบ PIT ทุกวัน (0 token) — เหตุผลเดียวกับ background track: ของที่ย้อนเก็บไม่ได้ต้องเริ่มก่อน
+# --- Thai track (finbg/th, finlab/thai.py, note 13) ---------------------------------
+# Owner's choice 2026-11-08: a Thai track fully separate from the US experiment (no shared criteria, no shared portfolio)
+# Stage 1 = daily point-in-time collection (0 tokens), for the same reason as the background track: what cannot be collected later must start first
 #
-# ตรวจกติกาของแต่ละเว็บแล้ว (2026-11-08):
-#   Yahoo (รายชื่อ + ราคา .BK)   ใช้อยู่แล้วกับฝั่ง US
-#   RSS สื่อหุ้นไทย              robots.txt อนุญาต · RSS ทำมาเพื่อให้ดึงอยู่แล้ว · เก็บในเครื่อง ไม่เผยแพร่ต่อ
-#   ประกาศของบริษัทใน SET       ❌ ยังไม่เก็บ — ข้อกำหนดของ SET อนุญาตใช้ส่วนตัว แต่ไม่มีช่องทางอัตโนมัติสาธารณะ
-#                                ที่ประกาศไว้ (ทางการคือ SMART Marketplace แบบเสียเงิน) → รอผู้ใช้ตัดสินใจ
-#   แบบ 59 การซื้อขายของผู้บริหาร ❌ ยังไม่เก็บ — sec.or.th บล็อกโปรแกรมด้วย WAF · robots ของ market.sec.or.th ห้ามหน้า idisc
+# Each site's rules were checked (2026-11-08):
+# Yahoo (stock list and .BK prices)  the same source as the US side (not in the public edition)
+# RSS from Thai stock media     robots.txt allows it; RSS is meant to be fetched; stored locally, not republished
+# SET company announcements    ❌ not collected: SET's terms allow personal use, but there is no published automated channel
+# (the official one is the paid SMART Marketplace), so this waits for the owner's decision
+# Form 59 insider trades       ❌ not collected: sec.or.th blocks programs with a WAF, and robots.txt of market.sec.or.th forbids the idisc pages
 RAW_TH = RAW / "th"
-RAW_TH_UNIVERSE = RAW_TH / "universe"   # ทุกหลักทรัพย์ใน SET/mai ณ วันนั้น → universe ไร้ survivorship นับจากวันนี้ไป
-RAW_TH_PRICES = RAW_TH / "prices"       # แท่งรายวันย้อน ~1 เดือนของหุ้นสามัญไทยทุกตัว
-RAW_TH_NEWS = RAW_TH / "news"           # ข่าวหุ้นไทยจาก RSS
-TH_CALENDAR_TICKER = "PTT.BK"           # วันที่ PTT มีราคา = วันทำการของ SET
-TH_BAR_FINAL_HOUR = 17                  # เวลาไทย — SET ปิดราว 16:40 หลัง closing auction ก่อนหน้านั้นแท่งของวันนี้ยังไม่ปิด
-TH_PRICE_PERIOD = "1mo"                 # snapshot รายวันย้อน 1 เดือน (ซ้อนกันได้ ตัวอ่านเก็บค่าที่ดึงทีหลังสุด)
-TH_CHUNK = 50                           # ticker ต่อคำขอ — ลดโอกาสโดน rate limit ของ Yahoo
+RAW_TH_UNIVERSE = RAW_TH / "universe"   # Every security on SET/mai on that day, giving a survivorship-free universe from today on
+RAW_TH_PRICES = RAW_TH / "prices"       # About one month of daily bars for every Thai common stock
+RAW_TH_NEWS = RAW_TH / "news"           # Thai stock news from RSS
+TH_CALENDAR_TICKER = "PTT.BK"           # Days on which PTT has a price = SET trading days
+TH_BAR_FINAL_HOUR = 17                  # Thai time: SET closes around 16:40 after the closing auction; before that, today's bar is not final
+TH_PRICE_PERIOD = "1mo"                 # Daily snapshots one month back (they may overlap; the reader keeps the most recently fetched value)
+TH_CHUNK = 50                           # Tickers per request, to lower the chance of hitting Yahoo's rate limit
 
-# "ซื้อขายได้จริง" สำหรับรายย่อย — วัด 2026-11-08: 835 บริษัท แต่ครึ่งหนึ่งซื้อขาย < ฿0.4M/วัน
-TH_TRADABLE_MIN_VALUE = 5e6             # บาท/วัน มัธยฐาน 60 วัน — ไม้ ฿100k–500k = 2–10% ของวัน
-TH_TRADABLE_MIN_PRICE = 2.0             # ต่ำกว่านี้ 1 tick (฿0.01) ≥ 0.5% ของราคา
-# ตาราง tick ของ SET: (ราคาต่ำกว่า, ขนาด tick) — 1 tick ≈ ต้นทุน spread ขั้นต่ำของการซื้อแล้วขาย 1 รอบ
+# "Really tradable" for a retail investor; measured 2026-11-08: 835 companies, but half trade < ฿0.4M a day
+TH_TRADABLE_MIN_VALUE = 5e6             # Baht per day, 60-day median; a ฿100k to ฿500k trade = 2 to 10% of a day's volume
+TH_TRADABLE_MIN_PRICE = 2.0             # Below this, 1 tick (฿0.01) is >= 0.5% of the price
+# SET tick table: (price below, tick size); 1 tick is roughly the minimum spread cost of one buy-and-sell round trip
 TH_TICKS = [(2, 0.01), (5, 0.02), (10, 0.05), (25, 0.10), (100, 0.25), (200, 0.50), (400, 1.00), (float("inf"), 2.00)]
-TH_COMMISSION_ROUND_TRIP = 0.003        # ~0.15%/ข้าง รวม VAT — ขึ้นกับโบรก
+TH_COMMISSION_ROUND_TRIP = 0.003        # About 0.15% per side including VAT; depends on the broker
 
 TH_NEWS_FEEDS: list[dict[str, str]] = [
     {"name": "kaohoon", "url": "https://www.kaohoon.com/feed"},
@@ -591,37 +591,37 @@ TH_NEWS_FEEDS: list[dict[str, str]] = [
     {"name": "prachachat-finance", "url": "https://www.prachachat.net/finance/feed"},
     {"name": "infoquest", "url": "https://www.infoquest.co.th/feed"},
 ]
-# ดึงวันละครั้งแล้วย้อนหน้า feed (?paged=N) จนเจอข่าวเก่ากว่านี้ — ได้ข่าวครบโดยไม่ต้องตั้งงานถี่ (ผู้ใช้ไม่เอางานรายชั่วโมง)
+# Fetch once a day and page back through the feed (?paged=N) until older news appears; complete coverage without frequent jobs (the owner did not want hourly jobs)
 TH_NEWS_LOOKBACK_HOURS = 30
 TH_NEWS_MAX_PAGES = 40
-TH_NEWS_PAGE_DELAY_SEC = 1.5            # สุภาพกับเว็บต้นทาง
-# ชื่อย่อหุ้นไทยที่ในข่าวมักหมายถึงอย่างอื่น → เก็บเป็น tickers_hint (ยังไม่ยืนยัน) ไม่ใช่ tickers
-# คัดจากพาดหัวจริง 2026-11-08: "AI" 16 ครั้งเป็นปัญญาประดิษฐ์ทั้งหมด · "CPI สหรัฐ" คือเงินเฟ้อ · "JV AMC" คือบริษัทบริหารสินทรัพย์
-# META/BYD ในข่าวไทยแทบทั้งหมดคือบริษัทต่างประเทศ ไม่ใช่หุ้นไทยตัวเล็กที่ใช้ชื่อย่อเดียวกัน
+TH_NEWS_PAGE_DELAY_SEC = 1.5            # Be polite to the source site
+# Thai tickers that usually mean something else in news are stored as tickers_hint (unconfirmed), not tickers
+# Picked from real headlines 2026-11-08: all 16 "AI" hits meant artificial intelligence, "CPI สหรัฐ" is US inflation, "JV AMC" is an asset management company
+# META/BYD in Thai news almost always mean the foreign companies, not the small Thai stocks with the same tickers
 TH_AMBIGUOUS_SYMBOLS = {"AI", "IT", "TH", "AMC", "CPI", "PLUS", "PM", "META", "BYD",
                         "ASIA", "GREEN", "POWER", "SOLAR", "CITY", "BIG", "WIN", "SUPER", "PLANET", "HYDRO", "KISS"}
-# ดัชนี: Yahoo ให้แค่ค่าล่าสุด ไม่มีประวัติ (ตรวจ 2026-11-08) — เก็บทุกวันเองเพื่อสร้างประวัติไว้ใช้เป็นบริบท
-# (ไม่ใช้เป็น benchmark ของพอร์ตไอเดีย เพราะวันที่เครื่องปิดจะขาดถาวร)
+# Indices: Yahoo gives only the latest value, no history (checked 2026-11-08), so we store them daily to build a history for context
+# (not used as the idea portfolio's benchmark, because days with the machine off would be missing for good)
 TH_INDEXES = ["^SET.BK", "^SET50.BK", "^SSET.BK", "^MAI.BK"]
 
-# ผู้ใช้เลือก 2026-11-08: ประกาศ SET → ใช้ข่าวจากสื่อแทน (C) · ตาราง 59 → ลองดึงหน้าบทความ InfoQuest (D)
-RAW_TH_ARTICLES = RAW_TH / "articles"   # เนื้อข่าวเต็มที่ดึงมาอ่าน (เฉพาะตัวที่ดำลึก + ตาราง 59)
-RAW_TH_INSIDER = RAW_TH / "insider"     # ตารางแบบ 59 ที่แยกเป็นรายการแล้ว
+# Owner's choice 2026-11-08: SET announcements -> use media news instead (C); Form 59 table -> try the InfoQuest article pages (D)
+RAW_TH_ARTICLES = RAW_TH / "articles"   # Full article text fetched for reading (only deep-dive stocks and the Form 59 table)
+RAW_TH_INSIDER = RAW_TH / "insider"     # Form 59 tables parsed into rows
 TH_ARTICLE_TIMEOUT_SEC = 20
-TH_ARTICLE_DELAY_SEC = 2.0              # ห่างกันอย่างน้อยเท่านี้ระหว่างหน้า — อ่านแบบคน ไม่ใช่ crawler
-TH_ARTICLE_MAX_CHARS = 3000             # ต่อบทความที่ส่งให้ Opus
-TH_FORM59_TITLE = "การเปลี่ยนแปลงการถือหลักทรัพย์ของผู้บริหาร"   # หัวข้อข่าวตาราง 59 รายวันของ InfoQuest
-TH_FORM59_PER_RUN = 6                   # ดึงหน้าตาราง 59 ไม่เกินเท่านี้ต่อรอบ (ปกติวันละ 1 หน้า)
+TH_ARTICLE_DELAY_SEC = 2.0              # At least this long between pages: read like a person, not a crawler
+TH_ARTICLE_MAX_CHARS = 3000             # Per article sent to Opus
+TH_FORM59_TITLE = "การเปลี่ยนแปลงการถือหลักทรัพย์ของผู้บริหาร"   # Headline of InfoQuest's daily Form 59 table
+TH_FORM59_PER_RUN = 6                   # Fetch at most this many Form 59 pages per round (normally one a day)
 
-# scanner ไทย (finbg/th/scan.py · โน้ต 13) — กรวยเดียวกับ US แต่เล็กกว่า (หุ้นที่ซื้อขายได้ ~150–200 ตัว)
-TH_OPPORTUNITIES = DATA / "opportunities_th"   # พอร์ตไอเดียไทย — แยกไฟล์จาก US เด็ดขาด
+# Thai scanner (finbg/th/scan.py, note 13): the same funnel as the US one but smaller (about 150 to 200 tradable stocks)
+TH_OPPORTUNITIES = DATA / "opportunities_th"   # Thai idea portfolio, in files strictly separate from the US one
 JOURNAL_TH = JOURNAL / "Thai"
-TH_SCAN_TRADABLE_DAYS = 20              # มัธยฐานมูลค่าซื้อขายย้อนหลัง (คลังรายวันเริ่ม 2026-11-08 มีแค่ ~1 เดือน)
-TH_SCAN_CANDIDATES = 20                 # ชั้น 1 → Sonnet (ตัวที่มีเหตุการณ์จริงมักน้อยกว่านี้)
-TH_SCAN_DEEP_DIVES = 2                  # ชั้น 2 → Opus — ตามแผนที่ผู้ใช้ตกลง (โควตา Pro)
-TH_SCAN_NEWS_FRESH_HOURS = 6            # ข่าวในคลังต้องดึงมาไม่เกินเท่านี้ ไม่งั้นไม่สแกน (ไม่ตัดสินจากข่าวเก่า)
-TH_ARTICLES_PER_PICK = 3                # ดึงเนื้อข่าวเต็มให้ตัวที่ดำลึก ตัวละไม่เกินเท่านี้
-TH_ATTENTION_DAYS = 5                   # "สื่อสนใจแค่ไหน" ดูจากจำนวนข่าวช่วงก่อนหน้านี้
+TH_SCAN_TRADABLE_DAYS = 20              # Median traded value over the lookback (the daily store started 2026-11-08 and has only about a month)
+TH_SCAN_CANDIDATES = 20                 # Stage 1 -> Sonnet (stocks with real events are usually fewer than this)
+TH_SCAN_DEEP_DIVES = 2                  # Stage 2 -> Opus, as the owner agreed (Pro quota)
+TH_SCAN_NEWS_FRESH_HOURS = 6            # News in the store must be fetched no longer ago than this, otherwise no scan (no decisions on old news)
+TH_ARTICLES_PER_PICK = 3                # Fetch full article text for deep-dive stocks, at most this many each
+TH_ATTENTION_DAYS = 5                   # "How much media attention" is measured by the number of news items in the period before this
 TH_INSIDER_LOOKBACK_DAYS = 10
 TH_INSIDER_CLUSTER_MIN_BUYERS = 2
 TH_INSIDER_BIG_BUY_THB = 1_000_000

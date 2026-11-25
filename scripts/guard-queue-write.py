@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""PreToolUse hook — อนุญาตให้เขียนไฟล์ได้เฉพาะใน data/queue/ เท่านั้น
+"""PreToolUse hook: allows file writes only inside data/queue/.
 
-## ทำไมต้องใช้ hook แทนกฎ permission ปกติ
+## Why a hook instead of an ordinary permission rule
 
-CLI 2.1.179 ไม่ match กฎรูปแบบ `Write(<path>)` เลย — ทดสอบแล้วทั้งสามแบบ
-(relative `data/queue/**`, absolute `//home/...`, home `~/...`) ถูกปฏิเสธหมด
-มีแต่ `Write` เปล่า ๆ ที่ทำงาน ซึ่งเท่ากับอนุญาตให้เขียนได้ทุกที่ในเครื่อง
-hook ทำงานคนละชั้นกับการ match กฎ จึงไม่ติดบั๊กนี้ และบังคับขอบเขตได้จริง
+CLI 2.1.179 does not match `Write(<path>)` rules at all; all three forms were tested
+(relative `data/queue/**`, absolute `//home/...`, home `~/...`) and all were refused.
+Only a bare `Write` works, which would allow writing anywhere on the machine.
+A hook runs in a different layer from rule matching, so it avoids this bug and really enforces the boundary.
 
-## ทำไมเป็นไฟล์ .py ไม่ใช่ .sh ที่มี heredoc
+## Why a .py file and not a .sh with a heredoc
 
-heredoc กิน stdin ของโปรเซส ทำให้สคริปต์อ่าน JSON ที่ hook ป้อนมาไม่ได้
-แล้วจะปฏิเสธทุกอย่างรวมทั้งที่ควรผ่าน (เคยพลาดมาแล้ว จับได้ตอน pipe-test)
+A heredoc consumes the process's stdin, so the script could not read the JSON the hook passes in,
+and it would refuse everything, including what should pass (this happened once and was caught in a pipe test).
 
-รับ JSON ทาง stdin · ตอบ JSON ที่มี permissionDecision กลับไปทาง stdout
+Reads JSON on stdin; answers with JSON containing permissionDecision on stdout.
 """
 
 import json
@@ -29,7 +29,7 @@ def decide(payload: dict) -> tuple[str, str]:
     if not path:
         return "deny", "guard: ไม่ระบุ file_path"
 
-    # ผ่าน realpath กัน ../ และ symlink ที่พาออกนอกขอบเขต
+    # Through realpath, to block ../ and symlinks that lead outside the allowed area
     resolved = os.path.realpath(path)
     if resolved.startswith(ALLOWED_PREFIX):
         return "allow", "guard: อยู่ใน data/queue"
@@ -40,7 +40,7 @@ def main() -> None:
     try:
         payload = json.load(sys.stdin)
     except Exception as exc:
-        # อ่าน input ไม่ได้ = ไม่รู้ว่ากำลังจะเขียนอะไร → ปฏิเสธไว้ก่อน
+        # Input cannot be read = we do not know what is about to be written, so refuse by default
         decision, reason = "deny", f"guard: อ่าน hook input ไม่ได้ ({exc})"
     else:
         decision, reason = decide(payload)

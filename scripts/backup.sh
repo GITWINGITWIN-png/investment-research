@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# สำรองคลังที่สร้างย้อนหลังไม่ได้
+# Back up the stores that cannot be rebuilt later
 #
-# สิ่งที่สำรอง — เลือกมาเพราะ "หายแล้วสร้างใหม่ไม่ได้" เท่านั้น:
-#   data/raw/     ราคาที่ปรับแล้วเปลี่ยนย้อนหลัง · URL ข่าวเน่าตามเวลา
-#   data/labels/  label ที่ทำย้อนหลัง = ปนเปื้อน hindsight
-#   data/plans/   แผนรายสัปดาห์ + พรอมต์ที่ใช้จริง + ผลคำทำนาย — track record ของ PM
-#   data/alerts/  ประวัติการแจ้งเตือน (เหตุผลของทุก replan)
-#   data/investigations/  ผลสืบเหตุการณ์ผันผวน + ข้อมูลที่ Claude ได้อ่าน
-#   data/opportunities/   พอร์ตไอเดีย + กลุ่มควบคุม + ผลจริง (สแกนทั้งตลาด)
-#   Journal/      คำทำนาย บทวิเคราะห์ สมมติฐาน — งานสมองล้วน
+# What is backed up, chosen only because it cannot be recreated once lost:
+#   data/raw/     adjusted prices change retroactively; news URLs rot over time
+#   data/labels/  labels made later would be contaminated by hindsight
+#   data/plans/   weekly plans + the prompts actually used + prediction results: the PM's track record
+#   data/alerts/  alert history (the reason for every replan)
+#   data/investigations/  investigations of violent moves + the data Claude read
+#   data/opportunities/   idea portfolio + control group + real outcomes (whole-market scan)
+#   Journal/      predictions, analyses, hypotheses: pure thinking work
 #
-# ไม่สำรอง data/derived/ เพราะคำนวณใหม่ได้จาก raw เสมอ
+# data/derived/ is not backed up because it can always be recomputed from raw
 
 set -uo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"   # the folder this repo was cloned to
 
-# ⚠️ ค่าเริ่มต้นอยู่บนดิสก์เดียวกัน = กันลบพลาดได้ แต่กันดิสก์พังไม่ได้
-# ควรเปลี่ยนเป็น external drive หรือ remote (เช่น user@host:/path หรือ rclone)
+# ⚠️ The default is on the same disk: it protects against accidental deletion, not against a disk failure;
+# change it to an external drive or a remote (e.g. user@host:/path or rclone)
 BACKUP_DIR="${FINBG_BACKUP_DIR:-${HOME}/backups/finbg}"
 
 LOG_FILE="${PROJECT_DIR}/data/logs/backup-$(date +%Y).log"
@@ -29,31 +29,31 @@ cd "${PROJECT_DIR}" || exit 1
 
 {
     echo "──────────────────────────────"
-    echo "▶ สำรอง $(date '+%Y-%m-%d %H:%M:%S')  →  ${BACKUP_DIR}"
+    echo "▶ backup $(date '+%Y-%m-%d %H:%M:%S')  →  ${BACKUP_DIR}"
 } >> "${LOG_FILE}"
 
 STATUS=0
 for SOURCE in data/raw data/labels data/plans data/alerts data/investigations data/opportunities Journal; do
     if [[ ! -d "${SOURCE}" ]]; then
-        echo "  ข้าม ${SOURCE} (ยังไม่มี)" >> "${LOG_FILE}"
+        echo "  skipped ${SOURCE} (does not exist yet)" >> "${LOG_FILE}"
         continue
     fi
-    # rsync สร้างโฟลเดอร์ปลายทางที่ซ้อนหลายชั้นเองไม่ได้ (เช่น data/raw ต้องมี data/ ก่อน)
-    # จึงต้อง mkdir -p เองก่อน — ไม่งั้นจะ fail เงียบ ๆ ทุกสัปดาห์
+    # rsync cannot create nested destination folders itself (data/raw needs data/ first),
+    # so mkdir -p comes first; otherwise it would fail silently every week
     mkdir -p "${BACKUP_DIR}/${SOURCE}"
 
-    # ไม่ใช้ --delete โดยตั้งใจ: ถ้าไฟล์ต้นทางหายเพราะอุบัติเหตุ
-    # สำเนาสำรองต้องยังอยู่ ไม่ถูกลบตามไปด้วย
+    # No --delete on purpose: if a source file disappears by accident,
+    # the backup copy must survive instead of being deleted with it
     if rsync -a "${SOURCE}/" "${BACKUP_DIR}/${SOURCE}/" >> "${LOG_FILE}" 2>&1; then
         COUNT=$(find "${SOURCE}" -type f | wc -l)
-        echo "  ✅ ${SOURCE} (${COUNT} ไฟล์)" >> "${LOG_FILE}"
+        echo "  ✅ ${SOURCE} (${COUNT} files)" >> "${LOG_FILE}"
     else
-        echo "  ❌ ${SOURCE} ล้มเหลว" >> "${LOG_FILE}"
+        echo "  ❌ ${SOURCE} failed" >> "${LOG_FILE}"
         STATUS=1
     fi
 done
 
 SIZE=$(du -sh "${BACKUP_DIR}" 2>/dev/null | cut -f1)
-echo "◀ จบ · ขนาดสำรองรวม ${SIZE} · exit=${STATUS}" >> "${LOG_FILE}"
+echo "◀ done, total backup size ${SIZE}, exit=${STATUS}" >> "${LOG_FILE}"
 
 exit ${STATUS}

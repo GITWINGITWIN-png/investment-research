@@ -1,17 +1,17 @@
-"""วงจรออกแผน: ถึงเวลาไหม → ประกอบข้อมูล → เรียกโมเดล → ตรวจ → (แก้ 1 รอบ) → เก็บ → แจ้ง
+"""The plan cycle: is a plan due? -> assemble data -> call the model -> check -> (fix once) -> store -> notify.
 
-## ถึงเวลาออกแผนรายสัปดาห์เมื่อไหร่
+## When a weekly plan is due
 
-แผนผูกกับ "สัปดาห์ของวันทำการถัดไป" (ISO week ตามเวลานิวยอร์ก):
-- เช้าวันเสาร์เวลาไทย = เย็นวันศุกร์ที่นิวยอร์ก หลังตลาดปิด → วันทำการถัดไปคือจันทร์ → แผนของสัปดาห์หน้า
-- ถ้ายังไม่มีแผนของสัปดาห์นั้น และเลยเวลาเริ่มช่วงออกแผน (เสาร์ 05:00 เวลาไทย) → ถึงเวลา
-- เครื่องปิดทั้งสุดสัปดาห์ → ออกตอนเปิดเครื่องครั้งแรก ถ้าเลยวันจันทร์ไปแล้ว ถือเป็น "แผนสาย" (late)
-  ยังออกได้ เพราะไม่มีแผนเลยแย่กว่าแผนสาย — และแผนมีผลไปข้างหน้าเท่านั้นอยู่แล้ว
+A plan belongs to "the week of the next trading day" (ISO week in New York time):
+- Saturday morning Thai time = Friday evening in New York after the close -> the next trading day is Monday -> next week's plan
+- If that week has no plan yet and the plan window has started (Saturday 05:00 Thai time), a plan is due
+- If the machine is off all weekend, the plan is issued at the first start-up; after Monday it counts as a "late" plan,
+  which is still issued, because no plan is worse than a late one, and plans only apply going forward anyway.
 
-## ทำไมแก้ได้แค่ 1 รอบ
+## Why only one fix round
 
-ข้อผิดพลาดส่วนใหญ่คือเลขไม่ลงตัว (ผลรวมไม่เท่ากับ 1, ลืมใส่ changes) ซึ่งแก้ได้ในรอบเดียว
-ถ้ารอบสองยังพัง แปลว่ามีอะไรผิดที่ต้องให้คนดู — ไม่ควรเผาโควตาวนต่อ
+Most errors are arithmetic (weights not summing to 1, missing changes) and get fixed in one round.
+If the second round still fails, something is wrong that a person should look at; the quota should not be burned in a loop.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def target_week(now: datetime | None = None) -> str:
 
 
 def window_start(week: str) -> datetime:
-    """เวลาเริ่มช่วงออกแผนของสัปดาห์นั้น (เวลาไทย): เสาร์ก่อนวันจันทร์ของสัปดาห์ เวลา 05:00"""
+    """Start of that week's plan window (Thai time): the Saturday before the week's Monday, at 05:00"""
     year, number = week.split("-W")
     monday = date.fromisocalendar(int(year), int(number), 1)
     saturday = date.fromordinal(monday.toordinal() - (7 - config.PLAN_WINDOW_WEEKDAY))
@@ -58,7 +58,7 @@ def _replans_recent(now: datetime) -> list[dict[str, Any]]:
 
 
 def replan_allowed(now: datetime | None = None) -> tuple[bool, str]:
-    """เพดานกันวนลูป: ไม่เกิน N ครั้ง/7 วัน และห่างกันอย่างน้อย M ชั่วโมง (นับแผนทุกชนิด)"""
+    """Loop guard: at most N plans per 7 days and at least M hours apart (counting every kind of plan)"""
     now = now or storage.utc_now()
     recent = _replans_recent(now)
     if len(recent) >= config.REPLAN_MAX_PER_WEEK:
@@ -94,7 +94,7 @@ def _feedback(errors: list[str]) -> str:
 
 def run(kind: str = "weekly", *, force: bool = False, dry_run: bool = False,
         trigger: list[str] | None = None, now: datetime | None = None) -> dict[str, Any]:
-    """ออกแผน 1 ฉบับ — คืนสรุปผล (ok, plan_id, path, …)"""
+    """Issue one plan; returns a summary (ok, plan_id, path, ...)"""
     storage.ensure_dirs()
     now = now or storage.utc_now()
 
@@ -172,7 +172,7 @@ def run(kind: str = "weekly", *, force: bool = False, dry_run: bool = False,
     if late:
         warnings.append("แผนสาย — ออกหลังวันจันทร์ของสัปดาห์ (เครื่องปิดช่วงออกแผน)")
 
-    # ID ข่าวที่ถูกอ้างที่ไหนก็ได้ในแผน (evidence, thesis, เหตุผลของการเปลี่ยน) → เก็บลิงก์ไว้กับแผน
+    # News IDs cited anywhere in the plan (evidence, thesis, reasons for changes) -> keep their links with the plan
     cited = set(schema.NEWS_ID.findall(__import__("json").dumps(output, ensure_ascii=False)))
     record = {
         "schema_version": schema.SCHEMA_VERSION,
@@ -184,7 +184,7 @@ def run(kind: str = "weekly", *, force: bool = False, dry_run: bool = False,
         "information": {"prices_as_of": meta["prices_as_of"], "today": meta["today"]},
         "model_used": result.get("model_used"),
         "model_expected": config.PLAN_MODEL,
-        # เวอร์ชันโค้ด/พรอมต์/กรอบที่ใช้ออกแผนนี้ — แก้กติกาเมื่อไหร่ ผลงานต้องแยกนับตามเวอร์ชัน
+        # Versions of the code, prompt and mandate used for this plan; whenever the rules change, results are counted per version
         "code_version": _code_version(),
         "effort": config.PLAN_EFFORT,
         "request_file": str(request_path.relative_to(config.ROOT)),

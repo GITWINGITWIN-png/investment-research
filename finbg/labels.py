@@ -1,34 +1,34 @@
-"""Labeled corpus — แปลงข่าวดิบเป็น label ที่มีโครงสร้าง (L2 บนบันไดการใช้ token)
+"""Labeled corpus: turns raw news into structured labels (L2 on the token-use ladder).
 
-## ทำไมงานนี้ต้องทำ "ตอนนี้" ไม่ใช่ทีหลัง
+## Why this has to happen now, not later
 
-ข่าวดิบเก็บฟรีด้วยโค้ด แต่ label ต้องใช้ token — และที่สำคัญกว่านั้น:
+Raw news is collected for free by code, but labels cost tokens, and more importantly:
 
-**ถ้า label ข่าวเดือน ส.ค. 2026 ในปี 2027 โมเดลรู้ผลลัพธ์ไปแล้ว → label ปนเปื้อน hindsight**
+**If August 2026 news is labelled in 2027, the model already knows the outcome, and the labels are contaminated by hindsight.**
 
-โดยเฉพาะฟิลด์ `novelty` (ข่าวนี้ใหม่จริงหรือย้ำของเดิม) ซึ่งต้องอาศัย
-"สิ่งที่รู้ ณ ตอนนั้น" เท่านั้น ทำย้อนหลังไม่ได้เลย
+The `novelty` field in particular (is this really new, or a repeat) depends
+on "what was known at the time" and cannot be done afterwards at all.
 
-→ labeled corpus จึงเป็น **สินทรัพย์ที่ซื้อไม่ได้และสร้างย้อนหลังไม่ได้**
-   และเป็นวัตถุดิบของ text alpha ในเฟส 3
+So the labeled corpus is **an asset that cannot be bought or rebuilt later**,
+   and it is the raw material for text alpha in phase 3.
 
-## สถาปัตยกรรม (ออกแบบตามข้อจำกัด Claude Pro)
+## Architecture (designed around the limits of Claude Pro)
 
-ผู้ใช้อยู่บน Claude Pro ไม่ได้จ่าย API แยก → cron เรียก LLM เองไม่ได้
-จึงแบ่งเป็น 3 ขั้น:
+The owner uses Claude Pro without a separate API plan, so cron cannot call the LLM itself.
+The work is split into 3 steps:
 
-    1. finbg label prepare   → เตรียม batch (โค้ดล้วน ฟรี)
-    2. เปิด Claude Code สั่ง label  → ใช้ token ตรงนี้ที่เดียว
-    3. finbg label ingest    → ตรวจความถูกต้องแล้วเก็บ (โค้ดล้วน ฟรี)
+    1. finbg label prepare   -> prepare a batch (plain code, free)
+    2. open Claude Code and label  -> the only step that uses tokens
+    3. finbg label ingest    -> validate and store (plain code, free)
 
-ข้อดีที่ตามมา: ขั้นที่ 2 จะทำเมื่อไหร่ก็ได้ที่ token เหลือ — ตรงกับโจทย์
-"ใช้ token ส่วนเกินก่อนหมดอายุ" พอดี
+A side benefit: step 2 can run whenever tokens are left over, which fits the goal
+of "using spare tokens before they expire".
 
-## หมายเหตุเรื่องที่เก็บไฟล์
+## Where the files live
 
-labels เก็บที่ `data/labels/` **ไม่ใช่ `data/derived/`** โดยตั้งใจ
-เพราะ derived คือของที่ลบแล้วสร้างใหม่ได้ แต่ label สร้างใหม่ไม่ได้อย่างซื่อสัตย์
-→ ต้องสำรองพร้อม raw เสมอ
+Labels are stored in `data/labels/`, **not `data/derived/`**, on purpose,
+because derived data can be deleted and rebuilt, but labels cannot be honestly rebuilt,
+so they must always be backed up together with the raw data.
 """
 
 from __future__ import annotations
@@ -43,9 +43,9 @@ from . import config, storage
 
 SCHEMA_VERSION = 1
 
-# --- นิยาม schema: แหล่งความจริงเดียว ---------------------------------------
-# ทั้ง prompt ที่ส่งให้ LLM และ validator ถูกสร้างจากตรงนี้
-# เพื่อไม่ให้ทั้งสองฝั่งหลุดจากกันเมื่อแก้ schema ในอนาคต
+# --- Schema definition: the single source of truth ---------------------------------------
+# Both the prompt sent to the LLM and the validator are built from here,
+# so the two cannot drift apart when the schema changes later
 
 ENUMS: dict[str, list[str]] = {
     "regime": ["risk_on", "risk_off", "neutral"],
@@ -62,11 +62,11 @@ ENUMS: dict[str, list[str]] = {
     "horizon": ["intraday", "days", "weeks", "months"],
 }
 
-# ระดับ effort ที่ยอมรับ — ไม่บังคับกรอก เพราะบางสภาพแวดล้อมโมเดลไม่รู้ค่านี้
+# Accepted effort levels; optional, because in some environments the model does not know this value
 EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 
-# ไม่ทำ whitelist ของชื่อโมเดล เพราะโมเดลใหม่ออกเรื่อย ๆ
-# การบังคับรายชื่อจะทำให้ระบบพังทุกครั้งที่มีรุ่นใหม่ — ตรวจแค่รูปแบบพอ
+# No whitelist of model names, because new models keep coming out;
+# enforcing a list would break the system with every release, so only the format is checked
 MODEL_MAX_LEN = 64
 
 FIELD_HELP: dict[str, str] = {
@@ -88,9 +88,9 @@ ENTITY_DIRECTIONS = ["positive", "negative", "neutral"]
 
 
 def schema_prompt() -> str:
-    """สร้างคำอธิบาย schema สำหรับใส่ในคำสั่ง label
+    """Build the schema description that goes into the labelling instructions.
 
-    สร้างจาก ENUMS/FIELD_HELP โดยตรง → แก้ schema ที่เดียว prompt เปลี่ยนตาม
+    Built directly from ENUMS/FIELD_HELP, so the prompt follows any schema change made in one place.
     """
     lines = ["ฟิลด์ที่ต้องใส่ให้ครบทุกบทความ:", ""]
     for field, help_text in FIELD_HELP.items():
@@ -103,22 +103,22 @@ def schema_prompt() -> str:
     return "\n".join(lines)
 
 
-# --- การตรวจความถูกต้อง ------------------------------------------------------
+# --- Validation ------------------------------------------------------
 
 def validate(record: dict[str, Any]) -> list[str]:
-    """ตรวจ 1 label — คืน list ของข้อผิดพลาด (ว่าง = ผ่าน)
+    """Validate one label; returns a list of errors (empty = pass).
 
-    เข้มไว้ก่อน: label ที่ผิดรูปแบบเข้าคลังไปแล้วเจอทีหลัง แก้ไม่ได้
-    (จะ label ใหม่ก็ปนเปื้อน hindsight ไปแล้ว)
+    Strict on purpose: a malformed label found after it entered the store cannot be fixed
+    (labelling it again would already be contaminated by hindsight).
     """
     errors: list[str] = []
 
     if not record.get("url"):
         errors.append("ไม่มี url (ใช้เป็น key เชื่อมกลับไปข่าวดิบ)")
 
-    # provenance: ต้องรู้เสมอว่าโมเดลไหนเป็นคน label
-    # ถ้าคลังปนหลายโมเดลโดยไม่รู้ตัว จะเกิด discontinuity ที่หน้าตาเหมือนสัญญาณจริง
-    # แต่แท้จริงเป็นแค่การเปลี่ยนโมเดล — และ debug ย้อนหลังไม่ได้เลย
+    # Provenance: always know which model produced a label
+    # If the corpus mixes models unnoticed, there are discontinuities that look like real signals
+    # but are only a change of model, and they cannot be debugged afterwards
     model = record.get("model")
     if not model or not str(model).strip():
         errors.append("ขาด model (ต้องระบุ model ID ที่ label ข่าวนี้)")
@@ -168,7 +168,7 @@ def validate(record: dict[str, Any]) -> list[str]:
     return errors
 
 
-# --- คลัง label --------------------------------------------------------------
+# --- Label store --------------------------------------------------------------
 
 def _labels_dir() -> Path:
     path = config.DATA / "labels"
@@ -177,12 +177,12 @@ def _labels_dir() -> Path:
 
 
 def published_at_index() -> dict[str, str]:
-    """แผนที่ url → published_at จากคลังข่าวดิบ **ทั้งหมด** (รวมที่ label ไปแล้ว)
+    """Map url -> published_at from the **whole** raw news store (including labelled items).
 
-    ต้องสแกนทั้งคลัง ไม่ใช่แค่ข่าวที่ยังไม่ label เพราะ:
-    - ตอน ingest ซ้ำ ข่าวนั้นถูก label ไปแล้วจึงไม่อยู่ในรายการ "ยังไม่ label"
-    - ตอน backfill ต้องหาวันที่ของข่าวที่ label ไปนานแล้ว
-    ถ้าใช้รายการที่ยังไม่ label จะได้ค่าว่างและ days_after_publish กลายเป็น null เงียบ ๆ
+    The whole store must be scanned, not only unlabelled news, because:
+    - on a repeated ingest the item is already labelled, so it is not in the "unlabelled" list
+    - a backfill needs the dates of items labelled long ago
+    Using only the unlabelled list would give empty values, and days_after_publish would silently become null.
     """
     index: dict[str, str] = {}
     for path in sorted(config.RAW_NEWS.glob("*.jsonl")):
@@ -200,10 +200,10 @@ def published_at_index() -> dict[str, str]:
 
 
 def days_between(published_raw: str, labeled_raw: str) -> int | None:
-    """จำนวนวันระหว่างข่าวออกกับตอน label — คืน None ถ้าแปลงวันที่ไม่ได้
+    """Days between publication and labelling; None if a date cannot be parsed.
 
-    แยกออกมาเป็นฟังก์ชันเพื่อให้ ingest กับ backfill ใช้ตรรกะเดียวกันเป๊ะ
-    ไม่งั้นค่าที่เติมย้อนหลังอาจไม่ตรงกับค่าที่คำนวณตอนแรก
+    A separate function so ingest and backfill use exactly the same logic;
+    otherwise backfilled values might not match the values computed originally.
     """
     if not published_raw or not labeled_raw:
         return None
@@ -220,7 +220,7 @@ def days_between(published_raw: str, labeled_raw: str) -> int | None:
 
 
 def labeled_urls() -> set[str]:
-    """URL ที่ label ไปแล้ว — ใช้กันการ label ซ้ำ (เปลือง token เปล่า)"""
+    """URLs already labelled, used to avoid labelling twice (wasted tokens)"""
     urls: set[str] = set()
     for path in _labels_dir().glob("*.jsonl"):
         with path.open(encoding="utf-8") as fh:
@@ -234,14 +234,14 @@ def labeled_urls() -> set[str]:
 
 
 def is_high_signal(record: dict[str, Any]) -> bool:
-    """ข่าวนี้คุ้มค่า label ไหม
+    """Whether this news item is worth labelling.
 
-    เกณฑ์: เป็นเอกสารต้นทาง **หรือ** ยืนยันได้ว่าเกี่ยวกับหุ้นใน watchlist
+    Criterion: an original document **or** confirmed to be about a watchlist stock.
 
-    เหตุผลที่ต้องกรอง (ดู config.LABEL_HIGH_SIGNAL_ONLY): ปริมาณข่าวที่ cron เก็บ
-    มากกว่าที่ label ไหวหลายเท่า และส่วนที่ตัดออกส่วนใหญ่เป็นบทความชวนคลิก
-    กับประกาศที่ไม่เกี่ยวกับ universe ของเรา — ซึ่งจะได้ materiality ต่ำอยู่ดี
-    การกรองจึงทำให้คลัง **ดีขึ้น** ไม่ใช่แย่ลง
+    Why filter (see config.LABEL_HIGH_SIGNAL_ONLY): cron collects many times more news
+    than can be labelled, and most of what is cut is clickbait
+    and announcements unrelated to our universe, which would get low materiality anyway.
+    So filtering makes the corpus **better**, not worse.
     """
     if record.get("source_type") in config.LABEL_PRIMARY_TYPES:
         return True
@@ -252,14 +252,14 @@ _SOURCE_TYPE_RANK = {"primary": 0, "outlet": 1, "aggregator": 2}
 
 
 def sector_of(record: dict[str, Any]) -> str:
-    """sector ของข่าว — จาก ticker ที่ยืนยันแล้วตัวแรก
+    """Sector of a news item, from its first confirmed ticker.
 
-    `tickers` ถูกเรียงไว้แล้วใน normalize() ผลจึงเหมือนเดิมทุกครั้งที่รัน
-    ข่าวที่พูดถึงหลาย sector จะถูกนับที่ sector แรกตามลำดับตัวอักษร ซึ่งเป็นการตัดสิน
-    ที่ไม่สมบูรณ์แต่คงเส้นคงวา — บันทึกไว้เป็นข้อจำกัดที่รู้ตัว
+    `tickers` is already sorted in normalize(), so the result is the same on every run.
+    A story about several sectors counts for the first sector alphabetically, a decision
+    that is imperfect but consistent; it is recorded as a known limitation.
 
-    ข่าวที่ไม่ผูกหุ้นตัวไหน (Fed, ตัวเลขเศรษฐกิจ, SEC ของบริษัทนอก watchlist)
-    ไปอยู่ถัง "macro" ซึ่งมีโควตาของตัวเอง — กันไม่ให้ประกาศ Fed ท่วมจนเบียดข่าวหุ้น
+    News tied to no stock (Fed, economic data, SEC filings outside the watchlist)
+    goes into a "macro" bucket with its own quota, so Fed releases cannot crowd out stock news.
     """
     for ticker in record.get("tickers") or []:
         sector = config.TICKER_SECTOR.get(ticker)
@@ -269,11 +269,11 @@ def sector_of(record: dict[str, Any]) -> str:
 
 
 def _label_priority(record: dict[str, Any]) -> tuple[int, str, str]:
-    """ลำดับความคุ้มค่าในการ label ภายในกลุ่มเดียวกัน
+    """Labelling priority within one group.
 
-    ตอนเลือกเรายัง **ไม่รู้ materiality** เพราะนั่นคือผลลัพธ์ของการ label เอง
-    จึงต้องใช้ตัวแทนที่รู้ได้ล่วงหน้า: เอกสารต้นทาง > สื่อ > สำนักข่าวรวม
-    แล้วค่อยเรียงตามเวลา และปิดท้ายด้วย url เพื่อให้ผลเหมือนเดิมทุกครั้งที่รัน
+    At selection time we **do not know the materiality yet**, because that is what labelling produces,
+    so a proxy known in advance is used: original document > outlet > aggregator,
+    then time, and finally url, so the result is the same on every run.
     """
     return (
         _SOURCE_TYPE_RANK.get(record.get("source_type", ""), 9),
@@ -283,18 +283,18 @@ def _label_priority(record: dict[str, Any]) -> tuple[int, str, str]:
 
 
 def _quota_eligible(records: list[dict[str, Any]], quota: int) -> set[str]:
-    """url ที่ผ่านโควตา — สูงสุด `quota` ชิ้น ต่อ (วันที่ข่าวออก, sector)
+    """URLs that pass the quota: at most `quota` items per (publication date, sector).
 
-    ## ทำไมต้องเป็นเพดานถาวร ไม่ใช่แค่จัดลำดับ
+    ## Why a permanent cap, not just an ordering
 
-    ถ้าแค่จัดลำดับให้สมดุลในแต่ละ batch loop จะวนจน label ครบทุกชิ้นอยู่ดี
-    ผลคือ (ก) ค่าใช้จ่ายโตตามจำนวน ticker และ (ข) สัดส่วนกลับไปเอียงหา big tech
-    เหมือนเดิม เพราะข่าวกลุ่มนั้นมีมากกว่ากลุ่มอื่นหลายเท่าโดยธรรมชาติ
+    If each batch were only balanced, the loop would keep going until everything was labelled anyway,
+    which means (a) cost grows with the number of tickers and (b) the mix tilts back towards big tech,
+    because that group naturally has many times more news than the others.
 
-    ## ทำไมต้องจัดอันดับรวมข่าวที่ label ไปแล้ว
+    ## Why the ranking includes already labelled news
 
-    ถ้าจัดอันดับเฉพาะข่าวที่ยังไม่ label เพดานจะขยายตัวเองทุกรอบ —
-    label ไป 6 ชิ้น อีก 6 ชิ้นถัดไปก็เลื่อนขึ้นมาอยู่ใน 6 อันดับแรกแทน ไม่มีวันจบ
+    Ranking only unlabelled news would let the cap expand every round:
+    label 6 items and the next 6 move up into the top 6, forever.
     """
     buckets: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for record in records:
@@ -309,13 +309,13 @@ def _quota_eligible(records: list[dict[str, Any]], quota: int) -> set[str]:
 
 
 def _candidates(high_signal_only: bool) -> list[dict[str, Any]]:
-    """ข่าวทั้งหมดที่ผ่านตัวกรอง — รวมที่ label ไปแล้ว (ต้องใช้ตอนจัดอันดับโควตา)
+    """All news that passes the filter, including labelled items (needed for the quota ranking).
 
-    คลังข่าวดิบเป็น "บันทึกการดึงข้อมูล" ไม่ใช่ตาราง unique — ตั้งใจให้เป็นแบบนั้น
-    เพราะ PIT ห้ามเขียนทับ ทุกรอบที่ cron ดึงจึงได้ snapshot เต็มชุดพร้อม fetched_at ของตัวเอง
-    ผลคือข่าวเดิมโผล่ซ้ำข้ามไฟล์ได้ตามปกติ → ผู้อ่านต้องกรองเอง ไม่ใช่ผู้เขียน
-    เก็บตัวแรกที่เจอ (ไฟล์เรียงตามชื่อ = ตามเวลา) เพราะ fetched_at แรกสุด
-    คือเวลาที่เรารู้เรื่องนี้จริง ๆ ซึ่งเป็นค่าที่ PIT ต้องการ
+    The raw news store is a "log of fetches", not a unique table, on purpose:
+    point-in-time data must not be overwritten, so every cron fetch is a full snapshot with its own fetched_at.
+    The same story therefore appears in several files as normal, and the reader deduplicates, not the writer.
+    The first one found is kept (files sorted by name = by time), because the earliest fetched_at
+    is when we really learned about it, which is the value point-in-time needs.
     """
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
@@ -352,12 +352,12 @@ def unlabeled_articles(
     high_signal_only: bool | None = None,
     quota: int | None = None,
 ) -> list[dict[str, Any]]:
-    """ข่าวที่ยังไม่ได้ label ผ่านโควตาต่อ sector แล้ว เรียงจากเก่าไปใหม่
+    """Unlabelled news that passes the per-sector quota, oldest first.
 
-    เรียงจากเก่าก่อนโดยตั้งใจ: ข่าวเก่าที่ยังไม่ label กำลัง "เสื่อม" ลงเรื่อย ๆ
-    เพราะยิ่งทิ้งไว้นาน ยิ่งเสี่ยงว่าเราจะรู้ผลลัพธ์ไปแล้ว
+    Oldest first on purpose: unlabelled old news keeps "decaying",
+    because the longer it waits, the more likely we already know the outcome.
 
-    `quota=0` = ปิดโควตา (label ทุกชิ้นที่ผ่านตัวกรอง) — พฤติกรรมเดิมก่อนเพิ่ม sector
+    `quota=0` = quota off (label everything that passes the filter), the behaviour before sectors were added.
     """
     if high_signal_only is None:
         high_signal_only = config.LABEL_HIGH_SIGNAL_ONLY
@@ -378,10 +378,10 @@ def unlabeled_articles(
 
 
 def prepare(batch_size: int = 40, high_signal_only: bool | None = None) -> dict[str, Any]:
-    """เตรียมไฟล์คำสั่ง label 1 ชุด — ยังไม่ใช้ token
+    """Prepare one batch file of labelling instructions; no tokens used yet.
 
-    ใส่เฉพาะข้อมูลที่จำเป็นต่อการ label (พาดหัว/แหล่ง/วันที่) ไม่ใส่ record ดิบทั้งก้อน
-    เพราะทุกตัวอักษรใน batch คือ token ที่ต้องจ่าย
+    Only the data needed for labelling (headline, source, date) is included, not the whole raw record,
+    because every character in the batch is a token to pay for.
     """
     storage.ensure_dirs()
     articles = unlabeled_articles(limit=batch_size, high_signal_only=high_signal_only)
@@ -475,10 +475,10 @@ def prepare(batch_size: int = 40, high_signal_only: bool | None = None) -> dict[
 
 
 def ingest(response_path: Path | str | None = None) -> dict[str, Any]:
-    """อ่านไฟล์คำตอบ ตรวจความถูกต้อง แล้วเก็บเข้าคลัง
+    """Read an answer file, validate it, and store it.
 
-    label ที่ไม่ผ่านการตรวจจะ **ไม่ถูกเก็บ** และรายงานเหตุผลออกมา
-    ยอมเสีย token ที่ label ไปแล้ว ดีกว่าปล่อยข้อมูลเสียเข้าคลังถาวร
+    Labels that fail validation are **not stored**, and the reasons are reported.
+    Losing the tokens already spent is better than letting bad data into a permanent store.
     """
     queue_dir = config.DATA / "queue"
 
@@ -497,10 +497,10 @@ def ingest(response_path: Path | str | None = None) -> dict[str, Any]:
 
     published_at = published_at_index()
 
-    # ด่านสุดท้ายก่อนเขียนถาวร: กัน label ซ้ำ URL เดิม
-    # จำเป็นเพราะ ingest เขียนแบบ append — ถ้าซ้ำเข้าไปแล้วต้องแก้ไฟล์ด้วยมือ
-    # ซ้ำได้สองทาง: (ก) ไฟล์คำตอบมี URL เดิมสองบรรทัด (ข) ingest ไฟล์เดิมซ้ำรอบ
-    # การย้ายไฟล์เข้า done/ กันได้แค่ (ข) กรณีปกติ ไม่ครอบคลุมตอนสั่ง --path เอง
+    # Last gate before the permanent write: no second label for the same URL
+    # Needed because ingest appends; once a duplicate is in, the file has to be fixed by hand
+    # Duplicates can come two ways: (a) the answer file has the same URL on two lines, (b) the same file is ingested twice
+    # Moving files into done/ only prevents (b) in the normal case, not when --path is given by hand
     already = labeled_urls()
     seen_in_file: set[str] = set()
 
@@ -524,7 +524,7 @@ def ingest(response_path: Path | str | None = None) -> dict[str, Any]:
                 rejected.append({"line": line_no, "url": record.get("url", "")[:60], "errors": errors})
                 continue
 
-            # validate ผ่านแล้วจึงเช็กซ้ำ — มั่นใจได้ว่า url มีจริงและเป็นสตริง
+            # Duplicates are checked after validation passes, so url is known to exist and be a string
             url = record["url"]
             if url in already:
                 rejected.append({"line": line_no, "url": url[:60], "errors": ["ซ้ำ: URL นี้อยู่ในคลังแล้ว"]})
@@ -534,7 +534,7 @@ def ingest(response_path: Path | str | None = None) -> dict[str, Any]:
                 continue
             seen_in_file.add(url)
 
-            # คำนวณว่า label ทำหลังข่าวออกกี่วัน — ยิ่งมากยิ่งเสี่ยงปนเปื้อน hindsight
+            # How many days after publication the label was made; the more days, the higher the risk of hindsight contamination
             labeled_at = storage.utc_stamp()
             days_after = days_between(published_at.get(record["url"], ""), labeled_at)
             if days_after is None:
@@ -557,7 +557,7 @@ def ingest(response_path: Path | str | None = None) -> dict[str, Any]:
 
     storage.log_manifest("labels", out_path, len(accepted), source=target.name)
 
-    # ย้ายไฟล์ที่ ingest แล้วออกจากคิว กันการ ingest ซ้ำ
+    # Move ingested files out of the queue so they are not ingested twice
     done_dir = queue_dir / "done"
     done_dir.mkdir(exist_ok=True)
     target.rename(done_dir / target.name)
@@ -573,21 +573,21 @@ def ingest(response_path: Path | str | None = None) -> dict[str, Any]:
 
 
 def backfill(dry_run: bool = False) -> dict[str, Any]:
-    """เติม `days_after_publish` ที่เป็น null ย้อนหลัง
+    """Backfill `days_after_publish` where it is null.
 
-    ## ทำไมทำได้ (ทั้งที่เนื้อหา label ทำย้อนหลังไม่ได้)
+    ## Why this is allowed (when label content cannot be redone later)
 
-    `days_after_publish` ไม่ใช่วิจารณญาณ แต่เป็น **เลขที่คำนวณจากสองค่าที่เก็บไว้แล้ว**:
-        days_after_publish = labeled_at − published_at
-    ทั้งคู่อยู่ในคลัง (labeled_at อยู่ในตัว label · published_at อยู่ในข่าวดิบ)
-    จึงคำนวณใหม่ได้เสมอ ต่างจาก `novelty`/`materiality` ที่ถ้า label ช้าก็ปนเปื้อนไปแล้ว
+    `days_after_publish` is not a judgement but **a number computed from two stored values**:
+        days_after_publish = labeled_at - published_at
+    Both are in the store (labeled_at in the label, published_at in the raw news),
+    so it can always be recomputed, unlike `novelty`/`materiality`, which are already contaminated if labelled late.
 
-    ## ความปลอดภัย
+    ## Safety
 
-    - แตะเฉพาะฟิลด์ `days_after_publish` ที่เป็น null ฟิลด์อื่นไม่ยุ่ง
-    - เขียนไฟล์ชั่วคราวแล้ว rename ทับ (atomic) — ไฟล์ไม่พังกลางคัน
-    - ใช้ `labeled_at` ของ record นั้น ไม่ใช่เวลาปัจจุบัน
-      (ไม่งั้น label ที่ทำไป 3 วันก่อนจะได้ค่าของวันนี้ ซึ่งผิด)
+    - Touches only `days_after_publish` fields that are null; nothing else
+    - Writes a temporary file and renames it over the original (atomic), so the file cannot break midway
+    - Uses each record's own `labeled_at`, not the current time
+      (otherwise a label made 3 days ago would get today's value, which is wrong)
     """
     index = published_at_index()
     total = filled = still_null = 0
@@ -626,7 +626,7 @@ def backfill(dry_run: bool = False) -> dict[str, Any]:
             with tmp.open("w", encoding="utf-8") as fh:
                 for record in records:
                     fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-            tmp.replace(path)                       # atomic — ไม่มีสถานะไฟล์ครึ่ง ๆ กลาง ๆ
+            tmp.replace(path)                       # atomic: no half-written file state
             touched_files.append(path.name)
         elif changed:
             touched_files.append(path.name)
@@ -642,7 +642,7 @@ def backfill(dry_run: bool = False) -> dict[str, Any]:
 
 
 def stats() -> dict[str, Any]:
-    """สรุปคลัง label — ใช้ดูว่าสินทรัพย์โตแค่ไหนแล้ว"""
+    """Summary of the label store, to see how much the asset has grown"""
     records: list[dict[str, Any]] = []
     for path in sorted(_labels_dir().glob("*.jsonl")):
         with path.open(encoding="utf-8") as fh:
@@ -668,8 +668,8 @@ def stats() -> dict[str, Any]:
 
     by_model = counts("model")
 
-    # เตือนเมื่อคลังปนหลายโมเดล — เพราะรอยต่อระหว่างโมเดลจะดูเหมือนสัญญาณตลาดจริง
-    # ตอนวิเคราะห์ทีหลัง ทั้งที่ไม่ใช่ ต้องรู้ตัวก่อนจะสร้างอะไรบนคลังนี้
+    # Warn when the corpus mixes models, because the seams between models look like real market signals
+    # in later analysis when they are not; this must be known before anything is built on the corpus
     warnings: list[str] = []
     if len(by_model) > 1:
         share = " · ".join(f"{m} {n}" for m, n in by_model.items())

@@ -1,12 +1,12 @@
-"""ข่าวจาก RSS ของสื่อหลัก
+"""News from the RSS feeds of major media.
 
-ทำไม RSS ยังคุ้มในปี 2026 ทั้งที่ดูเป็นเทคโนโลยีเก่า:
-- **ไม่ต้องมี API key และแทบไม่มี rate limit** — ต่างจาก API ข่าวทุกเจ้า
-- เสถียรมาก มาตรฐานไม่เปลี่ยนมา 20 ปี
-- ได้ข่าวจาก **สื่อต้นทางโดยตรง** ไม่ผ่าน aggregator ที่อาจตัดทอน
+Why RSS is still worth it in 2026, old as it looks:
+- **No API key and almost no rate limit**, unlike every news API
+- Very stable; the standard has not changed in 20 years
+- News comes **straight from the original outlet**, not through an aggregator that may cut it
 
-ฟีดของธนาคารกลาง (Fed) มีค่าเป็นพิเศษ — เป็น **แหล่งปฐมภูมิ**
-ที่ประกาศนโยบายจริง ไม่ใช่การตีความของนักข่าว
+The central bank (Fed) feed is especially valuable: a **primary source**
+announcing actual policy, not a journalist's interpretation.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ SOURCE_TYPE_BY_KIND = {"outlet": "outlet", "primary": "primary"}
 
 
 def fetch(feeds: list[dict[str, str]] | None = None) -> list[dict[str, Any]]:
-    """ดึงทุกฟีดที่ตั้งไว้ — ฟีดหนึ่งพังไม่กระทบฟีดอื่น"""
+    """Fetch every configured feed; one broken feed does not affect the others"""
     import feedparser
 
     targets = feeds if feeds is not None else config.RSS_FEEDS
@@ -53,7 +53,7 @@ def fetch(feeds: list[dict[str, str]] | None = None) -> list[dict[str, Any]]:
                     source=f"rss:{name}",
                     source_type=SOURCE_TYPE_BY_KIND.get(kind, "outlet"),
                     publisher=name,
-                    # RSS ไม่บอก ticker ต้องเดาจากพาดหัวเอง
+                    # RSS gives no ticker, so it has to be inferred from the headline
                     tickers=tag_tickers(title),
                     extra={"summary": (entry.get("summary", "") or "")[:400]},
                 )

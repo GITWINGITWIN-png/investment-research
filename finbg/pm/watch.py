@@ -1,26 +1,26 @@
-"""เฝ้าระวังเหตุการณ์แรง — โค้ดตัดสินก่อน แล้วค่อยปลุก LLM เมื่อจำเป็น
+"""Watch for strong events: code decides first, and the LLM is woken only when needed.
 
-รอบปกติ: **สัปดาห์ละครั้ง** ก่อนออกแผนรายสัปดาห์ (morning.sh เรียก `finbg watch --weekly`)
-เดิมรันทุกชั่วโมง — ผู้ใช้เห็นว่าถี่เกิน (2026-10-24) ส่วนที่ต้องเร็วจริง (ราคาผันผวนรุนแรง
-และ trigger ของแผน) ย้ายไปอยู่ที่ volatility.py ซึ่งรันทุกวันหลังเก็บข้อมูล
-ไฟล์นี้จึงเหลือหน้าที่สรุป 8-K / ข่าวแรง / VIX ประจำสัปดาห์ให้แผนได้อ่าน
+Normal round: **once a week**, before the weekly plan (morning.sh calls `finbg watch --weekly`).
+It used to run hourly; the owner found that too frequent (2026-10-24). The parts that really need speed (violent price moves
+and plan triggers) moved to volatility.py, which runs daily after data collection,
+so this file now summarises the week's 8-Ks, strong news and VIX for the plan to read.
 
-## สิ่งที่เฝ้า (ทั้งหมดเป็นกฎในโค้ด ตรวจสอบได้)
+## What is watched (all rules in code, all checkable)
 
-| แหล่ง | เงื่อนไข | ระดับ |
+| Source | Condition | Level |
 |---|---|---|
-| ราคาตัวที่ถือ | ขยับวันนี้ ≥ ALERT_SHOCK_Z เท่าของความผันผวนปกติ และ ≥ % ขั้นต่ำ | high (z ≥ 5 → critical) |
-| SPY | ขยับวันนี้ ≥ ALERT_MARKET_MOVE % | high (≥ 4% → critical) |
-| VIX | ระดับ ≥ ALERT_VIX_LEVEL หรือพุ่ง ≥ ALERT_VIX_JUMP % ในวันเดียว | high (≥ 40 → critical) |
-| trigger ในแผน | ราคาทะลุระดับที่ PM ตั้งไว้เอง | exit/reduce → high · review → medium |
-| 8-K ของหุ้นที่ถือ | Item ระดับ high/critical (ดู config.SEC_8K_ITEMS) | ตามหัวข้อ |
-| ข่าวที่ label แล้ว | materiality ≥ ALERT_LABEL_MATERIALITY และกระทบตัวที่ถือ | high |
+| Holding prices | move today >= ALERT_SHOCK_Z times normal volatility and >= the minimum % | high (z >= 5 -> critical) |
+| SPY | move today >= ALERT_MARKET_MOVE % | high (>= 4% -> critical) |
+| VIX | level >= ALERT_VIX_LEVEL or a jump >= ALERT_VIX_JUMP % in one day | high (>= 40 -> critical) |
+| Plan triggers | the price crosses a level the PM set itself | exit/reduce -> high, review -> medium |
+| 8-Ks of holdings | high/critical items (see config.SEC_8K_ITEMS) | per item |
+| Labelled news | materiality >= ALERT_LABEL_MATERIALITY and it affects a holding | high |
 
-## ทำไมให้โค้ดเป็นด่านแรก
+## Why code is the first gate
 
-ถ้าให้ LLM อ่านข่าวทุกชั่วโมงเพื่อหาเรื่องสำคัญ = เผาโควตา 24 ครั้ง/วัน และ LLM
-ไม่คงเส้นคงวา (วันนี้ว่าสำคัญ พรุ่งนี้ว่าไม่) กฎที่เขียนไว้ชัดทำงานเหมือนเดิมทุกครั้ง
-และ LLM ถูกเรียกเฉพาะตอนที่ต้องใช้วิจารณญาณจริง: "เหตุการณ์นี้เปลี่ยนแผนไหม"
+Having an LLM read the news every hour to spot what matters burns quota 24 times a day, and the LLM
+is inconsistent (important today, not tomorrow). Written rules behave the same every time,
+and the LLM is called only when real judgement is needed: whether the event changes the plan.
 """
 
 from __future__ import annotations
@@ -60,11 +60,11 @@ def _alert(key: str, severity: str, title: str, detail: str, tickers: list[str],
             "tickers": tickers, "source": source, "at": storage.utc_stamp()}
 
 
-# --- ราคา --------------------------------------------------------------------
+# --- Prices --------------------------------------------------------------------
 
 def check_prices(satellite: dict[str, float], triggers: list[dict[str, Any]], plan_id: str | None,
                  known_through: str | None = None) -> list[dict[str, Any]]:
-    """`known_through` = วันที่ราคาล่าสุดที่แผนปัจจุบันเห็นแล้ว — แท่งก่อนหน้านั้นไม่นับเป็นเหตุการณ์ใหม่"""
+    """`known_through` = date of the latest price the current plan has seen; earlier bars do not count as new events"""
     from ..datasource import yf
     watch = sorted(set(satellite) | {"SPY", "^VIX"} | {t["ticker"] for t in triggers})
     raw = yf.download(watch, period="4mo", interval="1d", auto_adjust=False, progress=False, threads=True)
@@ -85,7 +85,7 @@ def check_prices(satellite: dict[str, float], triggers: list[dict[str, Any]], pl
         z = move / sigma if sigma > 0 else 0.0
         day = series.index[-1].date().isoformat()
         if known_through and day <= known_through:
-            continue                      # แผนปัจจุบันเห็นแท่งนี้แล้ว — ไม่ใช่ข่าวใหม่สำหรับมัน
+            continue                      # The current plan has already seen this bar, so it is not news to it
 
         if ticker == "^VIX":
             if last >= config.ALERT_VIX_LEVEL or move >= config.ALERT_VIX_JUMP:
@@ -125,7 +125,7 @@ def check_prices(satellite: dict[str, float], triggers: list[dict[str, Any]], pl
 # --- SEC ---------------------------------------------------------------------
 
 def check_sec(stocks: list[str], since: str | None) -> tuple[list[dict[str, Any]], str]:
-    """8-K ใหม่ของหุ้นที่ถือ — เฉพาะ Item ระดับ high/critical"""
+    """New 8-Ks of holdings, high/critical items only"""
     now = storage.utc_stamp()
     since = since or (storage.utc_now() - timedelta(days=2)).isoformat()
     cik_map = sec_source._ticker_to_cik()
@@ -158,7 +158,7 @@ def check_sec(stocks: list[str], since: str | None) -> tuple[list[dict[str, Any]
     return alerts, now
 
 
-# --- ข่าวที่ label แล้ว ----------------------------------------------------------
+# --- Labelled news ----------------------------------------------------------
 
 def check_labels(held: set[str], since: str | None) -> tuple[list[dict[str, Any]], str]:
     now = storage.utc_stamp()
@@ -189,7 +189,7 @@ def check_labels(held: set[str], since: str | None) -> tuple[list[dict[str, Any]
     return alerts, now
 
 
-# --- บันทึก + แจ้ง + วางแผนใหม่ ---------------------------------------------------
+# --- Record, notify, replan ---------------------------------------------------
 
 def _record(alerts: list[dict[str, Any]]) -> None:
     storage.ensure_dirs()
@@ -209,7 +209,7 @@ def _record(alerts: list[dict[str, Any]]) -> None:
 
 
 def weekly_due() -> tuple[bool, str]:
-    """รอบสัปดาห์: ถึงเวลาออกแผนรายสัปดาห์ หรือไม่ได้ตรวจมาเกิน 7 วัน"""
+    """Weekly round: a weekly plan is due, or nothing was checked for more than 7 days"""
     from . import runner
 
     state = _load_state()
@@ -228,7 +228,7 @@ def mark_weekly() -> None:
 
 
 def run(dry_run: bool = False, escalate: bool = True) -> dict[str, Any]:
-    """ตรวจหนึ่งรอบ คืนสรุป — dry_run = ตรวจอย่างเดียว ไม่แจ้ง ไม่บันทึก ไม่วางแผนใหม่"""
+    """Check one round and return a summary; dry_run = check only, no alerts, nothing saved, no replan"""
     state = _load_state()
     satellite, _, plan_id = plans_module.current_targets()
     record = plans_module.latest()
@@ -236,7 +236,7 @@ def run(dry_run: bool = False, escalate: bool = True) -> dict[str, Any]:
     held = set(satellite)
     stocks = [t for t in satellite if mandate.kind_of(t) == "stock"]
 
-    # เหตุการณ์ที่เกิดก่อนแผนปัจจุบันออก แผนเห็นไปแล้ว — ไม่ต้องปลุกให้วางแผนใหม่เพราะเรื่องเดิม
+    # Events from before the current plan was issued are already known to it; no need to wake it for old news
     known_through = (record or {}).get("information", {}).get("prices_as_of")
     plan_created = (record or {}).get("created_at")
     if plan_created:
@@ -252,7 +252,7 @@ def run(dry_run: bool = False, escalate: bool = True) -> dict[str, Any]:
     ):
         try:
             result = check()
-        except Exception as exc:                            # noqa: BLE001 — ตัวหนึ่งพังต้องไม่หยุดตัวอื่น
+        except Exception as exc:                            # noqa: BLE001 (one failure must not stop the others)
             errors.append(f"{name}: {type(exc).__name__}: {exc}")
             continue
         if name == "sec":

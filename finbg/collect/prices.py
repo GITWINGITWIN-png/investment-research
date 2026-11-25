@@ -1,10 +1,10 @@
-"""ดึงราคารายวันแล้วเก็บเป็น snapshot
+"""Fetch daily prices and store them as a snapshot.
 
-ทำไมต้องเก็บเองทั้งที่ yfinance ดึงย้อนหลังได้อยู่แล้ว:
-1. ราคาที่ปรับแล้ว (adjusted close) **เปลี่ยนย้อนหลัง** ทุกครั้งที่มีปันผล/แตกพาร์
-   ถ้าไม่เก็บ snapshot เราจะไม่มีทางรู้ว่า "ณ วันนั้นเราเห็นราคาเท่าไหร่"
-2. yfinance เป็น unofficial API — วันหนึ่งอาจใช้ไม่ได้ ถ้ามีคลังของตัวเองก็ยังทำงานต่อได้
-3. ทำให้ backtest ทำซ้ำได้เป๊ะ (reproducible) เพราะข้อมูลไม่เปลี่ยนใต้เท้าเรา
+Why keep our own copy when yfinance can fetch history anyway:
+1. Adjusted close **changes retroactively** with every dividend or split;
+   without snapshots there is no way to know "what price we saw on that day".
+2. yfinance is an unofficial API and may stop working one day; our own store keeps working.
+3. It makes backtests exactly reproducible, because the data does not change underneath us.
 """
 
 from __future__ import annotations
@@ -15,16 +15,16 @@ from .. import config, market, storage
 
 
 def _tidy(raw: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
-    """แปลงผลจาก yfinance (columns ซ้อนกัน) ให้เป็นตารางยาวที่อ่านง่าย
+    """Turn the yfinance result (nested columns) into a long, readable table.
 
-    yfinance คืน MultiIndex columns เมื่อขอหลาย ticker แต่คืนแบบธรรมดาเมื่อขอตัวเดียว
-    ฟังก์ชันนี้ทำให้ทั้งสองกรณีออกมาหน้าตาเหมือนกัน
+    yfinance returns MultiIndex columns for several tickers but plain columns for one;
+    this function makes both cases look the same.
     """
     if raw.empty:
         return pd.DataFrame()
 
     if isinstance(raw.columns, pd.MultiIndex):
-        # ระดับคอลัมน์คือ (field, ticker) — สลับให้เป็นแถวละ (date, ticker)
+        # The column levels are (field, ticker); reshape to one row per (date, ticker)
         df = raw.stack(level=-1, future_stack=True).reset_index()
         df.columns = [str(c) for c in df.columns]
         df = df.rename(columns={df.columns[0]: "date", df.columns[1]: "ticker"})
@@ -44,7 +44,7 @@ def _tidy(raw: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
     }
     df = df.rename(columns=rename)
 
-    # ถ้า yfinance ปรับราคาให้แล้ว จะไม่มีคอลัมน์ adj_close แยก
+    # If yfinance already adjusted the prices, there is no separate adj_close column
     if "adj_close" not in df.columns:
         df["adj_close"] = df["close"]
 
@@ -56,7 +56,7 @@ def _tidy(raw: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
 
 
 def _history_rows() -> dict[str, int]:
-    """จำนวนแถวราคาที่มีในคลังต่อ ticker — ใช้ตัดสินว่าตัวไหนยังไม่เคยดึงย้อนหลัง"""
+    """Number of stored price rows per ticker; used to decide which tickers were never backfilled"""
     df = storage.read_all_prices()
     if df.empty:
         return {}
@@ -64,10 +64,10 @@ def _history_rows() -> dict[str, int]:
 
 
 def _backfill_attempted() -> set[str]:
-    """ticker ที่เคยสั่งดึงย้อนหลังไปแล้ว (อ่านจาก manifest)
+    """Tickers already backfilled (read from the manifest).
 
-    กันการดึงซ้ำทุกวันสำหรับหุ้นที่ประวัติสั้นจริง ๆ (เช่น เพิ่ง IPO)
-    ซึ่งดึงกี่ครั้งก็ได้แถวเท่าเดิม
+    Prevents a daily re-fetch for stocks whose history really is short (for example a recent IPO),
+    which return the same rows however often they are fetched.
     """
     done: set[str] = set()
     if not config.MANIFEST.exists():
@@ -95,15 +95,15 @@ def _download(tickers: list[str], period: str) -> pd.DataFrame:
 
 
 def backfill_short_history(min_rows: int = config.PRICE_BACKFILL_MIN_ROWS) -> dict[str, object]:
-    """ดึงย้อนหลัง 10 ปีให้ ticker ที่ประวัติสั้นผิดปกติ
+    """Backfill 10 years for tickers with an unusually short history.
 
-    ## ปัญหาที่แก้
+    ## The problem
 
-    การดึง 10 ปีเกิดครั้งเดียวตอนคลังว่าง หลังจากนั้นดึงแค่ 1 เดือนล่าสุด
-    หุ้นที่เพิ่มเข้า watchlist ทีหลัง (16 ตัวเมื่อ 6 ส.ค.) จึงมีประวัติแค่ไม่กี่เดือน
-    → brief แสดง 1y และ MA200 เป็น "—" และงานวิจัยย้อนหลังใช้หุ้นพวกนี้ไม่ได้
+    The 10-year fetch happens once, when the store is empty; after that only the latest month is fetched.
+    Stocks added to the watchlist later (16 of them on 6 August) therefore had only a few months of history,
+    so the brief showed 1y and MA200 as "—" and backtests could not use them.
 
-    ราคาย้อนหลังเป็นข้อมูลที่ "ดึงย้อนหลังได้" จึงซ่อมได้เสมอ ต่างจากข่าว
+    Price history can always be fetched again later, so this is always repairable, unlike news.
     """
     rows = _history_rows()
     attempted = _backfill_attempted()
@@ -137,14 +137,14 @@ def backfill_short_history(min_rows: int = config.PRICE_BACKFILL_MIN_ROWS) -> di
 
 
 def collect(period: str | None = None) -> dict[str, object]:
-    """ดึงราคาแล้วเขียน snapshot 1 ไฟล์ต่อ 1 การรัน
+    """Fetch prices and write one snapshot file per run.
 
-    `period` = None หมายถึงให้ตัดสินใจอัตโนมัติ:
-    - ยังไม่มีข้อมูลเลย → ดึงย้อนหลัง 10 ปี (backfill ครั้งเดียว)
-    - มีข้อมูลแล้ว → ดึงแค่ 1 เดือนล่าสุด (จับการปรับราคาย้อนหลังด้วย)
+    `period` = None means decide automatically:
+    - no data yet: fetch 10 years back (a one-time backfill)
+    - data exists: fetch only the latest month (which also catches retroactive adjustments)
 
-    แท่งของวันที่ตลาดยังเปิดอยู่จะถูกตัดทิ้งเสมอ — ดู market.drop_incomplete_session
-    จากนั้นเติมประวัติให้ ticker ที่ประวัติสั้นผิดปกติ (ถ้ามี)
+    The bar for a session that is still open is always dropped; see market.drop_incomplete_session.
+    Then tickers with an unusually short history are backfilled (if any).
     """
     storage.ensure_dirs()
     tickers = config.all_tickers()

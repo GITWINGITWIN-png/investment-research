@@ -1,27 +1,27 @@
-"""แทร็กไทย — หุ้น SET/mai แยกจากการทดลองฝั่ง US ทั้งหมด (ดูโน้ต 13)
+"""Thai track: SET/mai stocks, fully separate from the US experiment (see note 13).
 
-## ทำไมมีแทร็กนี้ (วัด 2026-11-08 ก่อนตัดสินใจ)
+## Why this track exists (measured 2026-11-08 before deciding)
 
-สัญญาณราคาง่าย ๆ ในหุ้นไทยแรงกว่าหุ้นใหญ่ US ชัดเจน แต่ก้อนใหญ่อยู่ในหุ้นที่ซื้อขายไม่ได้จริง
-และ tick ของ SET ทำให้ต้นทุนต่อรอบ ≥ 0.6% — ส่วนที่น่าจะใช้ได้จริงสำหรับรายย่อยคือ
-สัญญาณช้า (low-vol, momentum) และข้อมูลภาษาไทยที่กองทุนต่างชาติไม่อ่าน ในหุ้นที่ซื้อขายได้ ~150–300 ตัว
+Simple price signals are clearly stronger in Thai stocks than in US large caps, but most of the effect sits in stocks that cannot really be traded,
+and SET's tick sizes make a round trip cost >= 0.6%. What a retail investor can likely use is
+slow signals (low volatility, momentum) and Thai-language information foreign funds do not read, in the roughly 150 to 300 tradable stocks.
 
-## ขั้น 1 (ไฟล์ในแพ็กเกจนี้) — เก็บข้อมูลแบบ point-in-time ทุกวัน 0 token
+## Stage 1 (the files in this package): daily point-in-time collection, 0 tokens
 
-    universe.py   รายชื่อทุกหลักทรัพย์ใน SET/mai ณ วันนั้น → หุ้นที่ถูกถอดในอนาคตจะยังอยู่ในคลังเรา
-    prices.py     แท่งรายวันของหุ้นสามัญไทยทุกตัว (เฉพาะแท่งที่ปิดแล้ว)
-    news.py       ข่าวหุ้นไทยจาก RSS ของสื่อ + ติดป้าย ticker จากพาดหัว
-    collect.py    รวมทั้งสามอย่าง (เรียกจาก scripts/morning.sh)
+    universe.py   every security on SET/mai on that day, so stocks delisted in future stay in our store
+    prices.py     daily bars for every Thai common stock (closed bars only)
+    news.py       Thai stock news from media RSS, with tickers tagged from headlines
+    collect.py    runs all three (called from scripts/morning.sh)
 
-## สิ่งที่ "ตั้งใจไม่เก็บ" และเหตุผล (ตรวจกติกาเว็บ 2026-11-08)
+## What is deliberately not collected, and why (site rules checked 2026-11-08)
 
-- ประกาศของบริษัทใน SET — ช่องทางทางการคือ SMART Marketplace (เสียเงิน) · หน้าเว็บของ SET
-  ไม่มีช่องทางอัตโนมัติที่เปิดให้สาธารณะ จึงไม่แกะ API ภายในของเว็บ → ผู้ใช้ตัดสินใจเรื่องนี้
-- แบบ 59 (ผู้บริหารซื้อขายหุ้น) — sec.or.th บล็อกโปรแกรมด้วย WAF และ robots.txt ของ
-  market.sec.or.th ห้ามหน้า idisc · ไม่เลี่ยงสิ่งที่เจ้าของเว็บตั้งใจกันไว้
+- SET company announcements: the official channel is SMART Marketplace (paid), and SET's website
+  offers no public automated channel, so its internal API is not reverse-engineered; the owner decides this.
+- Form 59 (insider trades): sec.or.th blocks programs with a WAF, and robots.txt of
+  market.sec.or.th forbids the idisc pages; nothing a site owner deliberately blocks is worked around.
 
-## แยกจากฝั่ง US โดยโครงสร้าง
+## Kept apart from the US side by structure
 
-ไม่มีไฟล์ใดใน finbg/scan หรือ finbg/pm import แพ็กเกจนี้ — การทดลองที่ตั้งเกณฑ์ไว้แล้ว
-(แผน W44 · พอร์ตไอเดีย) จึงไม่ถูกกระทบไม่ว่าแทร็กไทยจะเปลี่ยนไปแค่ไหน
+No file in finbg/scan or finbg/pm imports this package, so experiments with fixed criteria
+(plan W44, the idea portfolio) are unaffected however much the Thai track changes.
 """

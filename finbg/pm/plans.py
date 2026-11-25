@@ -1,11 +1,11 @@
-"""คลังแผน — `data/plans/<plan_id>.json` (ห้ามแก้หลังบันทึก) + หน้าอ่านใน Obsidian
+"""Plan store: `data/plans/<plan_id>.json` (never edited after saving) + reading pages in Obsidian.
 
-## ทำไมแผนแก้ไม่ได้
+## Why plans cannot be edited
 
-แผนคือ "คำทำนายที่บันทึกก่อนรู้ผล" รูปแบบหนึ่ง ถ้าแก้ย้อนหลังได้ track record ก็ไร้ความหมาย
-อยากเปลี่ยนใจกลางสัปดาห์ → ออกแผนใหม่ (replan) ซึ่งมีเวลาของตัวเองและมีผลไปข้างหน้าเท่านั้น
+A plan is a form of "prediction recorded before the outcome"; if it could be edited afterwards, the track record would mean nothing.
+To change course midweek, issue a new plan (replan), which has its own time and only applies going forward.
 
-plan_id: แผนรายสัปดาห์ = "2026-W44" · แผนฉุกเฉิน = "2026-W44-r1", "-r2", ...
+plan_id: weekly plan = "2026-W44"; emergency plans = "2026-W44-r1", "-r2", ...
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def for_week(week: str) -> list[dict[str, Any]]:
 
 
 def current_targets() -> tuple[dict[str, float], float, str | None]:
-    """น้ำหนักเป้าหมายของ satellite ตามแผนล่าสุด — ก่อนแผนแรกคือ control"""
+    """Target satellite weights from the latest plan; before the first plan, the control"""
     record = latest()
     if record is None:
         satellite, cash = mandate.passive_satellite()
@@ -72,7 +72,7 @@ def _created_local(record: dict[str, Any]) -> str:
 
 
 def render(record: dict[str, Any], status: dict[str, Any] | None = None) -> Path:
-    """หน้า Obsidian ของแผน — อ่านจบในหน้าเดียวว่าคิดอะไร ถืออะไร จะถอยเมื่อไหร่"""
+    """Obsidian page for a plan: one page that says what it thinks, what it holds, and when it will back off"""
     plan = record["plan"]
     targets = record["targets"]
     previous = record.get("previous_targets") or {}
@@ -81,7 +81,7 @@ def render(record: dict[str, Any], status: dict[str, Any] | None = None) -> Path
     sleeve = 1.0 - config.PM_CORE_WEIGHT
 
     def evidence_links(items: list[str]) -> str:
-        """แปลง ID ข่าว (N12) ในหลักฐานเป็นลิงก์ — ข้อความอื่นคงไว้ตามเดิม"""
+        """Turn news IDs (N12) in the evidence into links; all other text stays as it is"""
         import re
 
         def link(match: re.Match[str]) -> str:
@@ -205,7 +205,7 @@ def render(record: dict[str, Any], status: dict[str, Any] | None = None) -> Path
 
 
 def status_lines(status: dict[str, Any]) -> list[str]:
-    """ตารางผลงานพอร์ต PM เทียบ control และ baseline — ใช้ทั้งในหน้าแผนและ brief"""
+    """Performance table of the PM portfolio against the control and the baselines; used on plan pages and in the brief"""
     if not status.get("started"):
         pending = status.get("pending_plan")
         if pending:

@@ -1,14 +1,14 @@
-"""ปฏิทินประกาศงบ + ประมาณการของนักวิเคราะห์ (snapshot รายวัน)
+"""Earnings calendar and analyst estimates (daily snapshot).
 
-## ทำไมต้องเก็บทุกวัน ทั้งที่วันประกาศงบเปลี่ยนไม่บ่อย
+## Why collect every day when earnings dates rarely change
 
-ส่วนที่มีค่าคือ **ประมาณการ** (EPS/รายได้ที่นักวิเคราะห์คาดเฉลี่ย) ซึ่งถูกเขียนทับทุกวัน
-และไม่มีแหล่งฟรีที่เก็บย้อนหลังแบบ point-in-time — ถ้าไม่เก็บวันนี้ก็หายถาวร
-(ดูโน้ต 10 หัวข้อ "ย้อนหลังเก็บไม่ได้")
+The valuable part is the **estimates** (consensus EPS and revenue), which are overwritten every day,
+and no free source keeps point-in-time history of them; what is not saved today is gone for good
+(see note 10, "History cannot be collected later").
 
-ใช้ทำอะไร:
-- แผนรายสัปดาห์ต้องรู้ว่าสัปดาห์หน้ามีหุ้นตัวไหนประกาศงบ (เหตุการณ์ที่ราคากระโดดได้)
-- อนาคต: "earnings surprise" = ผลจริงเทียบประมาณการ ณ วันก่อนประกาศ
+Uses:
+- The weekly plan needs to know which stocks report next week (events that can make prices jump)
+- Later: "earnings surprise" = actual results against the estimate on the day before the report
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def collect(tickers: list[str] | None = None) -> dict[str, Any]:
-    """ดึงปฏิทินของทุกหุ้นใน watchlist แล้วเก็บเป็น snapshot 1 ไฟล์"""
+    """Fetch the calendar for every watchlist stock and save it as one snapshot file"""
     from ..datasource import yf
     storage.ensure_dirs()
     targets = tickers or config.WATCHLIST
@@ -43,7 +43,7 @@ def collect(tickers: list[str] | None = None) -> dict[str, Any]:
     for ticker in targets:
         try:
             calendar = yf.Ticker(ticker).calendar or {}
-        except Exception as exc:                       # noqa: BLE001 — ตัวหนึ่งพังต้องไม่ลามตัวอื่น
+        except Exception as exc:                       # noqa: BLE001 (one failure must not spread to the others)
             print(f"  ⚠️  calendar/{ticker}: {type(exc).__name__}")
             failed.append(ticker)
             continue
@@ -74,7 +74,7 @@ def collect(tickers: list[str] | None = None) -> dict[str, Any]:
 
 
 def latest() -> dict[str, dict[str, Any]]:
-    """snapshot ล่าสุด: ticker → ข้อมูลปฏิทิน"""
+    """Latest snapshot: ticker -> calendar data"""
     files = sorted(config.RAW_CALENDAR.glob("*.jsonl"))
     if not files:
         return {}
@@ -90,7 +90,7 @@ def latest() -> dict[str, dict[str, Any]]:
 
 
 def upcoming(days: int = 14, today: date | None = None) -> list[dict[str, Any]]:
-    """หุ้นที่จะประกาศงบภายใน `days` วันข้างหน้า เรียงตามวัน"""
+    """Stocks reporting within the next `days` days, sorted by date"""
     today = today or storage.utc_now().date()
     horizon = today + timedelta(days=days)
     events: list[dict[str, Any]] = []

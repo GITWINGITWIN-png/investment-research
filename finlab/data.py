@@ -1,20 +1,20 @@
-"""ข้อมูลสำหรับงานวิจัย — universe + ราคาย้อนหลัง 10 ปี
+"""Data for research: the universe + 10 years of price history.
 
-## แยกจากคลัง PIT ของ finbg โดยตั้งใจ
+## Kept apart from finbg's point-in-time store on purpose
 
-`data/raw/` ของ finbg คือหลักฐานว่า "ณ วันนั้นเราเห็นอะไร" — ห้ามแก้ ห้ามเขียนทับ
-ราคาย้อนหลังสำหรับวิจัยเป็นของที่ **ดาวน์โหลดใหม่ได้ทุกเมื่อ** จึงเก็บแยกที่ `data/research/`
-ลบทิ้งแล้วสร้างใหม่ได้ ไม่ต้องสำรอง
+finbg's `data/raw/` is the evidence of "what we saw on that day": never edited, never overwritten.
+Research price history **can be downloaded again at any time**, so it is stored separately in `data/research/`,
+where it can be deleted and rebuilt with no backup needed.
 
-## ⚠️ ข้อจำกัดที่รู้ตัว: survivorship + look-ahead ในการเลือก universe
+## ⚠️ Known limitation: survivorship and look-ahead in the universe choice
 
-universe นี้คือบริษัทที่ **ใหญ่ที่สุดในวันนี้** (ลำดับจากไฟล์ company_tickers.json ของ SEC
-ซึ่งเรียงตามขนาดโดยประมาณ) แล้วย้อนไปทดสอบ 10 ปี — เท่ากับเลือกเฉพาะ "ผู้ชนะที่เรารู้แล้ว"
-บริษัทที่เจ๊ง/ถูกซื้อ/หลุดจากดัชนีระหว่างทางไม่อยู่ในนี้เลย
+This universe is the companies that are **largest today** (in the order of SEC's company_tickers.json,
+roughly by size), tested 10 years back, which amounts to choosing only "winners we already know".
+Companies that failed, were acquired or left the index along the way are not in it at all.
 
-ผลที่ตามมา: factor ที่ชอบหุ้นขาขึ้น (เช่น momentum) จะดูดีเกินจริง
-→ ตัวเลขที่ได้จาก universe นี้คือ **ขอบบน** ไม่ใช่ค่าคาดหวัง
-ทางแก้จริงต้องใช้ข้อมูลที่มีหุ้นถูกถอด (CRSP/Sharadar) — บันทึกไว้ในโน้ต 09/11
+Consequence: factors that favour rising stocks (such as momentum) look better than they are,
+so the numbers from this universe are an **upper bound**, not an expected value.
+The real fix needs data that includes delisted stocks (CRSP/Sharadar); recorded in notes 09 and 11.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ PRICES_PATH = RESEARCH / "prices.parquet"
 
 
 def build_universe(size: int = 300) -> dict[str, Any]:
-    """เลือกบริษัทใหญ่ที่สุด `size` แห่ง (ตัดชนิดหุ้นซ้ำของบริษัทเดียวกัน) + ETF ของ finbg"""
+    """Choose the `size` largest companies (dropping extra share classes of the same company) + finbg's ETFs"""
     import requests
 
     from finbg.collect.sources import sec as sec_source
@@ -45,7 +45,7 @@ def build_universe(size: int = 300) -> dict[str, Any]:
     tickers: list[str] = []
     for entry in response.json().values():
         if entry["cik_str"] in seen_cik:
-            continue                                  # GOOGL/GOOG, BRK-A/BRK-B → เอาตัวแรก
+            continue                                  # GOOGL/GOOG, BRK-A/BRK-B -> take the first
         symbol = entry["ticker"].upper().replace(".", "-")
         if not symbol.replace("-", "").isalpha():
             continue
@@ -73,7 +73,7 @@ def universe() -> dict[str, Any]:
 
 
 def download_prices(years: int = 10, chunk: int = 50, refresh: bool = False) -> dict[str, Any]:
-    """ดาวน์โหลดราคา 10 ปีของทั้ง universe ทีละก้อน (ลดโอกาสโดน rate limit)"""
+    """Download 10 years of prices for the whole universe in chunks (lowers the chance of a rate limit)"""
     from finbg.datasource import yf
     from finbg.collect.prices import _tidy
 
@@ -105,9 +105,9 @@ def download_prices(years: int = 10, chunk: int = 50, refresh: bool = False) -> 
 
 
 def load_prices(field: str = "adj_close", kind: str = "stocks") -> pd.DataFrame:
-    """ตาราง wide (วันที่ × ticker) — kind = stocks | etfs | all
+    """Wide table (date x ticker); kind = stocks | etfs | all.
 
-    กรองให้เหลือวันทำการของตลาดหุ้น (วันที่ SPY มีราคา) และตัดหุ้นที่มีราคาน้อยเกินไปทิ้ง
+    Filtered to stock-market trading days (days on which SPY has a price), dropping stocks with too few prices.
     """
     df = pd.read_parquet(PRICES_PATH)
     df["date"] = pd.to_datetime(df["date"])
@@ -121,9 +121,9 @@ def load_prices(field: str = "adj_close", kind: str = "stocks") -> pd.DataFrame:
 
 
 def forward_returns(prices: pd.DataFrame, horizon: int) -> pd.DataFrame:
-    """ผลตอบแทนจากราคาปิดวัน t ถึงวัน t+h — วางไว้ที่แถว t
+    """Return from the close on day t to day t+h, placed on row t.
 
-    นี่คือ "คำตอบ" ที่ factor ณ วัน t พยายามทำนาย
-    กับดัก: ห้ามใช้ค่านี้เป็น input ของ factor เด็ดขาด — มันคืออนาคต (ดู factors.lookahead_cheat)
+    This is the "answer" a factor on day t tries to predict.
+    Trap: never use this value as a factor input; it is the future (see factors.lookahead_cheat).
     """
     return prices.shift(-horizon) / prices - 1.0

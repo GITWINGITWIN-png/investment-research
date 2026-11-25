@@ -1,12 +1,12 @@
-"""แปลง context pack → Situation Brief ที่เปิดอ่านใน Obsidian ได้
+"""Turn a context pack into a Situation Brief that opens in Obsidian.
 
-นี่คือ "ชั้นที่ 1.5": จัดข้อเท็จจริงให้อ่านง่ายสำหรับคน **และ** สำหรับ LLM
-ส่วนการตีความเว้นไว้ให้ชั้นที่ 2 เติม (ดูหัวข้อ "การวิเคราะห์" ท้ายไฟล์)
+This is "layer 1.5": it lays the facts out for people **and** for an LLM.
+Interpretation is left for layer 2 to fill in (see the "Analysis" section at the end of the file).
 
-ทำไมต้องแยกไฟล์ brief ออกจาก context pack (JSON):
-- JSON เหมาะให้ LLM อ่าน (โครงสร้างชัด ไม่มีคำฟุ่มเฟือย)
-- Markdown เหมาะให้คนอ่านและใช้เป็นบันทึกถาวรใน Obsidian
-ทั้งสองมาจากแหล่งเดียวกัน จึงไม่มีทางขัดแย้งกัน
+Why the brief is separate from the context pack (JSON):
+- JSON suits an LLM (clear structure, no filler words)
+- Markdown suits people and serves as a permanent note in Obsidian
+Both come from the same source, so they cannot disagree.
 """
 
 from __future__ import annotations
@@ -23,14 +23,14 @@ ARROW_FLAT = "⚪"
 
 
 def _fmt_pct(value: Any, width: int = 0) -> str:
-    """จัดรูปแบบ % พร้อมเครื่องหมาย — คืน '—' ถ้าไม่มีข้อมูล"""
+    """Format a percentage with its sign; '—' when there is no data"""
     if value is None:
         return "—".rjust(width)
     return f"{value:+.2f}%".rjust(width)
 
 
 def _signal(value: Any) -> str:
-    """สัญลักษณ์สีบอกทิศทางแบบเร็ว ๆ"""
+    """Coloured symbol showing the direction at a glance"""
     if value is None:
         return ARROW_FLAT
     if value > 0.5:
@@ -41,7 +41,7 @@ def _signal(value: Any) -> str:
 
 
 def _returns_table(items: dict[str, dict[str, Any]], label_key: str | None = "label") -> list[str]:
-    """ตารางผลตอบแทนหลายช่วงเวลา ใช้ซ้ำได้ทั้ง benchmark / sector / watchlist"""
+    """Multi-period return table, reused for benchmarks, sectors and the watchlist"""
     lines = [
         "| | สินทรัพย์ | ราคา | 1d | 1w | 1m | 3m | 1y | vs MA200 | ตำแหน่ง 52w | mom 12-1 | vol 60d |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -71,7 +71,7 @@ def _fmt_num(value: Any, suffix: str = "", digits: int = 1) -> str:
 
 
 def _fmt_money(value: Any) -> str:
-    """เงินก้อนใหญ่แบบอ่านง่าย: 466.8B / 89.1M"""
+    """Large amounts in readable form: 466.8B / 89.1M"""
     if value is None:
         return "—"
     if abs(value) >= 1e12:
@@ -82,7 +82,7 @@ def _fmt_money(value: Any) -> str:
 
 
 def _fundamentals_section(pack: dict[str, Any]) -> list[str]:
-    """ตารางงบล่าสุดของ watchlist — จาก SEC XBRL (ตัวเลขตามที่บริษัทยื่นจริง)"""
+    """Latest financials table for the watchlist, from SEC XBRL (the figures as the companies filed them)"""
     data = pack.get("fundamentals") or {}
     if not data:
         return ["*ยังไม่มีข้อมูลงบ — รัน `uv run finbg daily` (ดึงอัตโนมัติสัปดาห์ละครั้ง)*"]
@@ -127,10 +127,10 @@ def _earnings_section(pack: dict[str, Any]) -> list[str]:
 
 
 def _previous_pack(current_as_of: str) -> dict[str, Any] | None:
-    """หา context pack ก่อนหน้า เพื่อเทียบว่า 'อะไรเปลี่ยนไปตั้งแต่ brief ที่แล้ว'
+    """Find the previous context pack, to compare what changed since the last brief.
 
-    ส่วนนี้คือสิ่งที่ทำให้ brief ทบต้น — อ่านฉบับเดียวได้ภาพนิ่ง
-    แต่การเทียบกับฉบับก่อนทำให้เห็น *การเปลี่ยนแปลง* ซึ่งมีข้อมูลมากกว่า
+    This is what makes the briefs build on each other: one issue is a still picture,
+    but comparing with the previous one shows *the change*, which carries more information.
     """
     files = sorted((config.DERIVED / "context").glob("*.json"))
     earlier = [f for f in files if f.stem < current_as_of]
@@ -140,7 +140,7 @@ def _previous_pack(current_as_of: str) -> dict[str, Any] | None:
 
 
 def _changes_section(pack: dict[str, Any], previous: dict[str, Any] | None) -> list[str]:
-    """สรุปการเปลี่ยนแปลงเชิงระบอบ (regime) ตั้งแต่ brief ที่แล้ว"""
+    """Summary of regime changes since the last brief"""
     if previous is None:
         return [
             "> [!info] นี่คือ brief ฉบับแรก",
@@ -150,7 +150,7 @@ def _changes_section(pack: dict[str, Any], previous: dict[str, Any] | None) -> l
     lines = [f"เทียบกับ brief วันที่ **{previous.get('as_of', '?')}**", ""]
     notable: list[str] = []
 
-    # ระบอบความผันผวน
+    # Volatility regime
     now_vix = pack.get("volatility", {})
     old_vix = previous.get("volatility", {})
     if now_vix.get("regime") and old_vix.get("regime") and now_vix["regime"] != old_vix["regime"]:
@@ -159,7 +159,7 @@ def _changes_section(pack: dict[str, Any], previous: dict[str, Any] | None) -> l
             f"(VIX {old_vix.get('last')} → {now_vix.get('last')})"
         )
 
-    # ความกว้างของตลาด
+    # Market breadth
     now_breadth = pack.get("breadth", {}).get("pct")
     old_breadth = previous.get("breadth", {}).get("pct")
     if now_breadth is not None and old_breadth is not None:
@@ -171,7 +171,7 @@ def _changes_section(pack: dict[str, Any], previous: dict[str, Any] | None) -> l
                 f"ของหุ้นอยู่เหนือ MA200 ({delta:+.1f} จุด)"
             )
 
-    # หุ้นที่ขยับแรงผิดปกติ
+    # Stocks with unusually large moves
     for group in ("watchlist", "sectors"):
         for ticker, data in pack.get(group, {}).items():
             old = previous.get(group, {}).get(ticker, {})
@@ -190,7 +190,7 @@ def _changes_section(pack: dict[str, Any], previous: dict[str, Any] | None) -> l
 
 
 def render(pack: dict[str, Any]) -> str:
-    """สร้างเนื้อหา Markdown ของ brief"""
+    """Build the Markdown body of the brief"""
     as_of = pack["as_of"]
     previous = _previous_pack(as_of)
     local_now = datetime.now(tz=config.LOCAL_TZ).strftime("%Y-%m-%d %H:%M")
@@ -204,7 +204,7 @@ def render(pack: dict[str, Any]) -> str:
         f"date: {as_of}",
         "tags: [brief, situation, market]",
         f"generated_at: {pack.get('generated_at', '')}",
-        # การตีความย้ายไปอยู่ในแผนรายสัปดาห์ (Journal/Plans) — brief รายวันเป็นข้อเท็จจริงล้วน
+        # Interpretation moved to the weekly plan (Journal/Plans); the daily brief is facts only
         "analysis: weekly-plan",
         "---",
         "",
@@ -222,7 +222,7 @@ def render(pack: dict[str, Any]) -> str:
         "",
     ]
 
-    # กล่องสรุปสถานะเร็ว
+    # Quick status box
     regime_note = f"**{vol.get('regime', '?')}**" if vol else "ไม่มีข้อมูล"
     out.extend([
         "| ตัวชี้วัด | ค่า | ความหมาย |",
@@ -261,7 +261,7 @@ def render(pack: dict[str, Any]) -> str:
     out.extend(["", "---", "", "## 📅 ประกาศงบ 14 วันข้างหน้า", ""])
     out.extend(_earnings_section(pack))
 
-    # --- อะไรเปลี่ยนไป ---
+    # --- What changed ---
     out.extend(["", "---", "", "## 🔄 เปลี่ยนแปลงตั้งแต่ brief ที่แล้ว", ""])
     out.extend(_changes_section(pack, previous))
 
@@ -287,7 +287,7 @@ def render(pack: dict[str, Any]) -> str:
     else:
         out.append("*ยังไม่มีข้อมูล ledger — รัน `uv run finbg ledger`*")
 
-    # --- ข่าว ---
+    # --- News ---
     out.extend(["", "---", "", "## 📰 ข่าวที่เก็บได้", ""])
     news = pack.get("news", {})
     if news.get("available"):
@@ -371,7 +371,7 @@ def render(pack: dict[str, Any]) -> str:
         for hypothesis in backlog[:10]:
             out.append(f"- [[{hypothesis['file']}|{hypothesis['title']}]]")
 
-    # --- Portfolio Manager: แผน + ผลงาน + แจ้งเตือน + คำทำนาย ---
+    # --- Portfolio Manager: plan, performance, alerts, predictions ---
     out.extend(["", "---", ""])
     out.extend(_pm_section(pack.get("pm") or {}))
     out.extend(["", "---", ""])
@@ -388,7 +388,7 @@ def render(pack: dict[str, Any]) -> str:
 
 
 def _pm_section(pm: dict[str, Any]) -> list[str]:
-    """สรุปพอร์ต PM ในหน้า brief — รายละเอียดเต็มอยู่ในหน้าแผน"""
+    """PM portfolio summary on the brief page; full details are on the plan page"""
     from ..pm import plans as plans_module
 
     lines = ["## 🧭 แผนรายสัปดาห์ที่ใช้อยู่", ""]
@@ -446,7 +446,7 @@ def _opportunities_section(block: dict[str, Any]) -> list[str]:
 
 
 def build_brief() -> dict[str, Any]:
-    """สร้าง brief จาก context pack ล่าสุด แล้วเขียนลง Obsidian"""
+    """Build a brief from the latest context pack and write it to Obsidian"""
     from . import context as context_module
 
     pack = context_module.build()

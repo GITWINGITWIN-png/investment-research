@@ -1,14 +1,14 @@
-"""Portfolio Manager — LLM วางแผนรายสัปดาห์ โค้ดตรวจและรันบนพอร์ตกระดาษ (ดูโน้ต 11)
+"""Portfolio Manager: an LLM plans weekly, code checks the plan and runs it on a paper portfolio (see note 11).
 
-    mandate.py      กรอบที่ PM ขยับได้ (คำนวณจาก config ที่เดียว)
-    schema.py       รูปแบบแผน (JSON schema) + ตัวตรวจกติกาทางธุรกิจ
-    context.py      ประกอบข้อมูลทั้งหมดที่ PM ได้อ่าน — 0 token
-    runner.py       ถึงเวลาออกแผนไหม → เรียกโมเดล → ตรวจ → เก็บ → แจ้ง
-    plans.py        คลังแผน (data/plans) + หน้า Obsidian (Journal/Plans)
-    portfolio.py    จำลองพอร์ต llm_pm เทียบ control ที่ราคาปิด พร้อมต้นทุนซื้อขาย
-    predictions.py  ตัดสินคำทำนายด้วยราคาอัตโนมัติ + calibration
-    watch.py        เฝ้าข่าว/ราคาแรง → แจ้งเตือน → วางแผนใหม่ทันทีเมื่อจำเป็น
+    mandate.py      what the PM may change (computed from config in one place)
+    schema.py       plan format (JSON schema) + business-rule checks
+    context.py      assembles everything the PM gets to read; 0 tokens
+    runner.py       is a plan due? -> call the model -> check -> store -> notify
+    plans.py        plan store (data/plans) + Obsidian pages (Journal/Plans)
+    portfolio.py    simulates the llm_pm portfolio against the control at the close, with trading costs
+    predictions.py  resolves predictions from prices automatically, plus calibration
+    watch.py        watches strong news and price moves -> alerts -> replans at once when needed
 
-หลักที่ยึดทั้งแพ็กเกจ: **โมเดลเขียนแผน โค้ดถือกฎ** — ทุกข้อจำกัดอยู่ในโค้ด
-เพราะโมเดลเถียงพรอมต์ได้ แต่แก้โค้ดไม่ได้
+The rule across the package: **the model writes the plan, the code holds the rules**. Every constraint lives in code,
+because the model can argue with a prompt but cannot change code.
 """

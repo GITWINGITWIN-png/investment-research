@@ -1,20 +1,20 @@
-"""พอร์ตไอเดีย + กลุ่มควบคุม — ตัวตัดสินว่า "การดำลึกของ Claude หาโอกาสที่คนมองข้ามได้จริงไหม"
+"""Idea portfolio + control group: the judge of whether Claude's deep dives really find overlooked opportunities.
 
-## บันทึกอะไรบ้าง (append-only ทั้งหมด — แก้ย้อนหลังไม่ได้)
+## What is recorded (all append-only, never edited afterwards)
 
-| ไฟล์ | อะไร | ตอบคำถาม |
+| File | What | Question answered |
 |---|---|---|
-| candidates.jsonl | ผู้เข้ารอบ 30 ตัวทุกวัน (คะแนนชั้น 1 + ผล Sonnet) | ตัวกรองของโค้ดช่วยไหม |
-| ideas.jsonl | ผลดำลึกทุกตัว (add_to_book / watch / pass) | — |
-| control.jsonl | สุ่มจาก 30 ตัวเดียวกัน จำนวนเท่ากับ add_to_book | **Claude เลือกดีกว่าสุ่มไหม** |
-| resolutions.jsonl | ผลจริงหลัง 20 วันทำการ | — |
+| candidates.jsonl | the 30 finalists every day (stage 1 score + Sonnet's result) | does the code filter help |
+| ideas.jsonl | every deep-dive result (add_to_book / watch / pass) | - |
+| control.jsonl | a random draw from the same 30, as many as add_to_book | **does Claude pick better than random** |
+| resolutions.jsonl | the real outcome after 20 trading days | - |
 
-## กติกา (ตั้งก่อนเห็นผล — ห้ามแก้ระหว่างทาง ดูโน้ต 12)
+## Rules (set before seeing results; never changed midway, see note 12)
 
-- เข้า: ราคาปิดของวันทำการแรกที่ตลาดปิดหลังเวลาตัดสินใจ · ออก: 20 วันทำการถัดไป ที่ราคาปิด
-- ต้นทุน 30 bps ไป-กลับ · benchmark: IWM ถ้ามูลค่า < $10B ไม่งั้น SPY
-- การสุ่มกลุ่มควบคุมใช้ seed จากวันที่ → ทำซ้ำได้ ตรวจสอบได้ว่าไม่ได้เลือก
-- หุ้นที่ข้อมูลหาย (ถูกซื้อกิจการ/ถอดจากตลาด) บันทึกเป็น data_missing แยกให้เห็น ไม่ตัดทิ้งเงียบ ๆ
+- Entry: the close of the first trading day that closes after the decision time; exit: 20 trading days later, at the close
+- Cost 30 bps round trip; benchmark: IWM if market cap < $10B, otherwise SPY
+- The control draw uses a seed from the date, so it is reproducible and provably not hand-picked
+- Stocks whose data disappears (acquired or delisted) are recorded separately as data_missing, not silently dropped
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ CANDIDATES = config.OPPORTUNITIES / "candidates.jsonl"
 IDEAS = config.OPPORTUNITIES / "ideas.jsonl"
 CONTROL = config.OPPORTUNITIES / "control.jsonl"
 RESOLUTIONS = config.OPPORTUNITIES / "resolutions.jsonl"
-# รอบที่ประกาศยกเลิก (ข้อมูลเข้าเสีย) — ต้องประกาศ *ก่อน* รู้ผล พร้อมเหตุผล · บันทึกเดิมไม่ถูกลบ
+# Rounds declared void (bad input data): they must be declared *before* the outcome is known, with a reason; the original records are not deleted
 VOIDED = config.OPPORTUNITIES / "voided.jsonl"
 
 
@@ -66,7 +66,7 @@ def _read(path) -> list[dict[str, Any]]:
 def record(session: str, created_at: str, candidates: list[dict[str, Any]],
            triage: dict[str, dict[str, Any]], ideas: list[dict[str, Any]]) -> dict[str, Any]:
     caps = {c["ticker"]: c.get("market_cap") for c in candidates}
-    run = created_at[:16].replace(":", "")            # id ไม่ซ้ำแม้สแกนวันทำการเดิมซ้ำ (หลังยกเลิกรอบที่ข้อมูลเสีย)
+    run = created_at[:16].replace(":", "")            # Unique ids even when the same trading day is scanned again (after voiding a round with bad data)
     _append(CANDIDATES, [{
         "id": f"{session}@{run}-cand-{c['ticker']}", "session": session, "created_at": created_at,
         "ticker": c["ticker"], "score": c["score"], "parts": c["parts"], "reasons": c["reasons"],
@@ -102,7 +102,7 @@ def _entries() -> list[dict[str, Any]]:
 
 
 def resolve(now: datetime | None = None) -> dict[str, Any]:
-    """คิดผลของทุกรายการที่ครบ 20 วันทำการแล้ว (ราคาปรับแล้วจาก yfinance ชุดใหม่)"""
+    """Compute the outcome of every entry that has reached 20 trading days (fresh adjusted prices from yfinance)"""
     from ..datasource import yf
     done = {r["id"] for r in _read(RESOLUTIONS)}
     sessions = market.sessions_from_prices(storage.price_matrix("adj_close"))
@@ -161,7 +161,7 @@ def _stats(values: list[float]) -> dict[str, float | None]:
 
 
 def _spearman(x: list[float], y: list[float]) -> float | None:
-    """Rank correlation — ใช้อันดับเฉลี่ยเมื่อเสมอกัน (คะแนน triage ซ้ำกันบ่อย)"""
+    """Rank correlation, using average ranks for ties (triage scores tie often)"""
     rx, ry = pd.Series(x, dtype=float).rank(), pd.Series(y, dtype=float).rank()
     if len(rx) < 3 or rx.std() == 0 or ry.std() == 0:
         return None
@@ -169,18 +169,18 @@ def _spearman(x: list[float], y: list[float]) -> float | None:
 
 
 def _residual_ranks(y: list[float], x: list[float]) -> list[float]:
-    """อันดับของ y หลังหักส่วนที่อันดับของ x อธิบายได้ — "Sonnet รู้อะไรที่คะแนนของโค้ดไม่รู้"""
+    """Ranks of y after removing what the ranks of x explain, i.e. what Sonnet knows that the code score does not"""
     ry, rx = pd.Series(y, dtype=float).rank(pct=True), pd.Series(x, dtype=float).rank(pct=True)
     beta = ry.cov(rx) / rx.var() if rx.var() > 0 else 0.0
     return list(ry - ry.mean() - beta * (rx - rx.mean()))
 
 
 def _newey_west_t(values: list[float], lag: int) -> float | None:
-    """t ของค่าเฉลี่ย เมื่อค่าที่อยู่ติดกันสัมพันธ์กัน
+    """t statistic of a mean when neighbouring values are correlated.
 
-    รอบสแกนที่ติดกันถือหุ้นช่วงเวลาซ้อนทับกัน 19 วัน (และหุ้นตัวเดิมเข้ารอบซ้ำได้) — t ธรรมดาจะนับ
-    20 รอบที่แทบเป็นเหตุการณ์เดียวกันเป็น 20 ตัวอย่างอิสระ แล้วสูงเกินจริง
-    Newey-West รวม covariance ของรอบที่ห่างกันไม่เกิน `lag` เข้าไปใน variance ด้วย (น้ำหนักลดลงตามระยะห่าง)
+    Adjacent scan rounds hold stocks over windows that overlap by 19 days (and the same stock can be a finalist again); a plain t would count
+    20 rounds that are almost one event as 20 independent samples and come out too high.
+    Newey-West adds the covariance of rounds up to `lag` apart into the variance (with weights that shrink with distance).
     """
     n = len(values)
     if n < 3:
@@ -194,14 +194,14 @@ def _newey_west_t(values: list[float], lag: int) -> float | None:
 
 
 def triage_ic(candidates_path=None, resolutions_path=None, voided: set[str] | None = None) -> dict[str, Any]:
-    """การทดสอบรอง (โน้ต 12 · ตั้ง 2026-11-08 ก่อนมีผลจริงตัวแรก): คะแนนของ Sonnet เรียงผู้เข้ารอบตรงกับผลจริงไหม
+    """Secondary test (note 12, set 2026-11-08 before the first real outcome): does Sonnet's score rank the finalists in line with the real outcome?
 
-    คะแนน = information_value × overlooked — สูตรเดียวกับที่ triage.pick ใช้เลือกตัวไปดำลึก (ไม่ได้คิดสูตรใหม่หลังเห็นผล)
-    ต่อรอบสแกน: rank correlation ระหว่างคะแนนกับผลตอบแทนส่วนเกิน 20 วันของผู้เข้ารอบที่คิดผลแล้ว → เฉลี่ยข้ามรอบ
-    คู่เทียบ: คะแนนชั้น 1 ของโค้ด และ "ส่วนที่ Sonnet เพิ่ม" หลังหักสิ่งที่คะแนนของโค้ดอธิบายได้แล้ว
+    Score = information_value x overlooked, the same formula triage.pick uses to choose deep dives (not a new formula made after seeing results).
+    Per scan round: the rank correlation between the score and the 20-day excess return of finalists with results, averaged across rounds.
+    Comparisons: the code's stage 1 score, and "what Sonnet adds" after removing what the code score already explains.
 
-    ค่าปริยาย = ไฟล์ของ scanner US · แทร็กไทย (finbg/th/book.py) ส่ง path ของตัวเองมา เพื่อให้ทั้งสองตลาด
-    ถูกวัดด้วยสถิติชุดเดียวกันเป๊ะ
+    The defaults are the US scanner's files; the Thai track (finbg/th/book.py) passes its own paths, so both markets
+    are measured with exactly the same statistics.
     """
     voided = voided_runs() if voided is None else voided
     outcome = {r["id"]: r["excess"] for r in _read(resolutions_path or RESOLUTIONS)
@@ -216,12 +216,12 @@ def triage_ic(candidates_path=None, resolutions_path=None, voided: set[str] | No
 
     series: dict[str, list[float]] = {"sonnet": [], "code": [], "sonnet_beyond_code": []}
     dive, no_dive = [], []
-    for key in sorted(runs):                                   # เรียงตามเวลา — Newey-West ต้องรู้ว่ารอบไหนติดกัน
+    for key in sorted(runs):                                   # Sorted by time; Newey-West needs to know which rounds are adjacent
         rows = runs[key]
         sonnet, code, excess = [r[0] for r in rows], [r[1] for r in rows], [r[2] for r in rows]
         ic_sonnet = _spearman(sonnet, excess)
         if len(rows) < config.TRIAGE_IC_MIN_NAMES or ic_sonnet is None:
-            continue                                           # ตัวน้อยไป หรือ Sonnet ให้คะแนนเท่ากันทั้งรอบ
+            continue                                           # Too few stocks, or Sonnet gave the whole round the same score
         series["sonnet"].append(ic_sonnet)
         for name, value in (("code", _spearman(code, excess)),
                             ("sonnet_beyond_code", _spearman(_residual_ranks(sonnet, code), excess))):

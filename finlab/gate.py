@@ -1,14 +1,14 @@
-"""ประตู 1 (โน้ต 07 เฟส 0): harness ต้องปฏิเสธของปลอมได้ ก่อนจะเชื่อของจริง
+"""Gate 1 (note 07, phase 0): the harness must reject fakes before it can be trusted on real factors.
 
-"ระบบวัดที่ดีต้องปฏิเสธของปลอมได้ — ถ้า harness บอกว่า random noise มี IC = 0.04
-แสดงว่ามันพัง และทุกอย่างหลังจากนี้ไร้ความหมาย" — นี่คือ unit test ของงานวิจัยเชิงปริมาณ
+"A good measuring system must reject fakes; if the harness says random noise has IC = 0.04,
+it is broken, and everything after that is meaningless." This is the unit test of quantitative research.
 
-| ข้อ | ทดสอบ | ผ่านเมื่อ |
+| # | Test | Passes when |
 |---|---|---|
-| 1 | factor สุ่ม 20 ตัว | IC เฉลี่ย ≈ 0 · มีนัยสำคัญ (|t|>2) ไม่เกิน 15% · ตัวที่ดีสุดมี DSR < 0.95 |
-| 2 | factor ที่แอบใช้อนาคต | ถูก lookahead_audit จับได้ และ factor จริงไม่ถูกจับผิด |
-| 3 | momentum 12-1 | Rank IC รายเดือนอยู่ในช่วงที่วรรณกรรมรายงาน (−0.03 ถึง 0.08) |
-| 4 | รันซ้ำ | ผลเหมือนเดิมทุกหลัก (deterministic) |
+| 1 | 20 random factors | mean IC about 0, at most 15% significant (|t|>2), the best has DSR < 0.95 |
+| 2 | a factor that secretly uses the future | caught by lookahead_audit, and real factors are not falsely flagged |
+| 3 | momentum 12-1 | monthly Rank IC within the range the literature reports (-0.03 to 0.08) |
+| 4 | re-run | identical results to the last digit (deterministic) |
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def run(seeds: int = 20) -> dict[str, Any]:
     result: dict[str, Any] = {"at": storage.utc_stamp(), "period": period, "stocks": names,
                               "universe_warning": data.universe()["warning"], "checks": {}}
 
-    # 1 — factor สุ่ม
+    # 1: random factors
     fwd1, fwd5 = data.forward_returns(prices, 1), data.forward_returns(prices, 5)
     rows, spreads = [], {}
     for seed in range(seeds):
@@ -72,7 +72,7 @@ def run(seeds: int = 20) -> dict[str, Any]:
         "cheat": cheat, "real": real,
     }
 
-    # 3 — momentum + ตาราง factor อ้างอิง
+    # 3: momentum + the reference factor table
     library: dict[str, Any] = {}
     for name, fn in factors.REAL.items():
         factor = fn(prices)
@@ -92,7 +92,7 @@ def run(seeds: int = 20) -> dict[str, Any]:
     }
     result["library"] = library
 
-    # 4 — ทำซ้ำได้
+    # 4: reproducible
     first, second = _ic_hash(prices), _ic_hash(data.load_prices("adj_close", "stocks"))
     result["checks"]["reproducible"] = {"passed": first == second, "hash_1": first, "hash_2": second}
 

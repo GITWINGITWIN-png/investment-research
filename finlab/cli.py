@@ -1,12 +1,12 @@
-"""จุดเข้าใช้งาน harness
+"""Entry point of the harness.
 
-    uv run finlab universe        เลือก universe (บริษัทใหญ่สุด 300 แห่ง)
-    uv run finlab prices          ดาวน์โหลดราคา 10 ปี (ครั้งแรก ~2-3 นาที)
-    uv run finlab gate            ตรวจประตู 1 — harness ปฏิเสธของปลอมได้ไหม
+    uv run finlab universe        choose the universe (the 300 largest companies)
+    uv run finlab prices          download 10 years of prices (about 2 to 3 minutes the first time)
+    uv run finlab gate            check gate 1: does the harness reject fakes?
     uv run finlab eval momentum_12_1
-    uv run finlab thai-prices     ราคา 10 ปีของหุ้นไทย (แทร็กไทย ขั้น 2)
-    uv run finlab thai            factor ช้าในหุ้นไทยที่ซื้อขายได้จริง หักต้นทุนตาม tick
-"""
+    uv run finlab thai-prices     10 years of Thai stock prices (Thai track, stage 2)
+    uv run finlab thai            slow factors in really tradable Thai stocks, net of tick costs
+    """
 
 from __future__ import annotations
 

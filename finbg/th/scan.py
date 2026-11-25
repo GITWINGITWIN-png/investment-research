@@ -1,12 +1,12 @@
-"""scanner ไทย — รวมชั้น 1–3 + พอร์ตไอเดีย (โน้ต 13) · morning.sh เรียกทุกวันหลัง `finbg th collect`
+"""Thai scanner: stages 1 to 3 plus the idea portfolio (note 13); morning.sh calls it daily after `finbg th collect`.
 
-    ชั้น 0  collect.py   รายชื่อ ราคา ข่าว ตาราง 59                          (0 token)
-    ชั้น 1  score.py     หุ้นที่ซื้อขายได้ + มีข่าวใหม่/ผู้บริหารซื้อ → ≤ 20 ตัว     (0 token)
-    ชั้น 2  llm.triage   Sonnet อ่านการ์ด → ส่งไปดำลึก
-    ชั้น 3  llm.deep_*   Opus อ่านเนื้อข่าวเต็ม ≤ 2 ตัว → ไอเดีย
-    วัดผล   book.py      พอร์ตไอเดีย + กลุ่มควบคุมที่สุ่มจากผู้เข้ารอบเดียวกัน
+    stage 0  collect.py   stock list, prices, news, Form 59 tables                     (0 tokens)
+    stage 1  score.py     tradable stocks with new news or insider buying -> <= 20     (0 tokens)
+    stage 2  llm.triage   Sonnet reads the cards -> sends some for a deep dive
+    stage 3  llm.deep_*   Opus reads the full articles for <= 2 stocks -> ideas
+    results  book.py      idea portfolio + a control group drawn from the same finalists
 
-สแกน 1 ครั้งต่อ 1 วันทำการที่ปิดแล้ว · ถ้าข่าวในคลังไม่สด (ขั้นเก็บข่าวพัง) จะไม่สแกน — ไม่ตัดสินจากข่าวเก่า
+One scan per closed trading day; if the news in the store is not fresh (news collection failed), there is no scan, so nothing is decided on old news.
 """
 
 from __future__ import annotations

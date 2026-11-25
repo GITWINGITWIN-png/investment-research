@@ -1,30 +1,29 @@
-"""แหล่งข่าวหลายแหล่ง — ออกแบบให้แต่ละแหล่งล้มได้อิสระ
+"""Several news sources, designed so that each can fail independently.
 
-## ปัญหาที่แก้
+## The problem
 
-เดิมใช้ GDELT แหล่งเดียว → เป็น single point of failure
-พอโดน rate limit ก็ไม่ได้ข่าวเลยทั้งวัน
+GDELT used to be the only source, a single point of failure:
+one rate limit meant no news at all for the day.
 
-## แต่ประโยชน์จริงมากกว่าแค่ "สำรอง"
+## The real benefit goes beyond a backup
 
-แต่ละแหล่งมี bias ของตัวเอง การมีหลายแหล่งจึงให้ภาพที่ครบกว่า:
+Each source has its own bias, so several sources give a fuller picture:
 
-| แหล่ง | ชนิด | จุดแข็ง | จุดอ่อน |
+| Source | Type | Strength | Weakness |
 |-------|------|---------|---------|
-| GDELT | aggregator | กว้างมาก นานาชาติ หลายภาษา | rate limit เข้ม · ไม่มีเนื้อบทความ |
-| Yahoo | outlet | ผูกกับ ticker ตรง ๆ | เน้นสหรัฐฯ · ปนบทความชวนคลิก |
-| RSS | outlet | ทันเหตุการณ์ สื่อหลัก | จำนวนจำกัด · ไม่ผูก ticker |
-| SEC | **primary** | **เอกสารต้นทาง มีนัยสำคัญตามกฎหมาย** | ไม่ใช่ "ข่าว" · อ่านยาก |
+| GDELT | aggregator | very broad, international, many languages | strict rate limit, no article text |
+| RSS | outlet | timely, major media | limited volume, no ticker |
+| SEC | **primary** | **original documents with legal weight** | not "news", hard to read |
 
-`source_type` ถูกเก็บไว้ในทุก record เพื่อให้ตอนวิเคราะห์แยกน้ำหนักได้ —
-8-K จาก SEC เป็นข้อเท็จจริงที่บริษัทต้องแจ้ง ส่วนบทความ aggregator
-เป็นการตีความ ไม่ควรนับเท่ากัน
+`source_type` is stored on every record so analysis can weight sources differently:
+an 8-K from the SEC is a fact the company must disclose, while an aggregator article
+is interpretation, and the two should not count the same.
 
-## สัญญาที่ทุก source ต้องทำตาม
+## Contract every source follows
 
-- ฟังก์ชัน `fetch()` คืน `list[dict]` ที่ผ่าน `normalize()` แล้ว
-- **ห้าม raise** — ล้มเหลวให้คืน list ว่างพร้อมพิมพ์เหตุผล
-  เพราะแหล่งหนึ่งล่มต้องไม่ทำให้แหล่งอื่นเสียไปด้วย
+- `fetch()` returns a `list[dict]` that has gone through `normalize()`
+- **never raise**: on failure, return an empty list and print the reason,
+  because one source going down must not take the others with it
 """
 
 from __future__ import annotations
@@ -49,20 +48,20 @@ def normalize(
     tickers_hint: list[str] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """บีบ record จากทุกแหล่งให้เป็นรูปแบบเดียวกัน
+    """Normalise records from every source into one format.
 
-    สำคัญมากต่อ labeled corpus: ถ้าแต่ละแหล่งมีโครงสร้างต่างกัน
-    label ที่ได้จะเทียบข้ามแหล่งไม่ได้ และ schema จะเน่าเมื่อเพิ่มแหล่งใหม่
+    This matters a lot for the labeled corpus: if each source had its own structure,
+    labels could not be compared across sources and the schema would rot as sources were added.
 
-    ## ทำไมต้องแยก tickers กับ tickers_hint
+    ## Why tickers and tickers_hint are separate
 
-    บทเรียนจากข้อมูลจริง: Yahoo แสดง "ข่าวที่เกี่ยวข้อง" บนหน้าของแต่ละ ticker
-    ซึ่ง**ไม่ได้แปลว่าข่าวนั้นเกี่ยวกับหุ้นตัวนั้น** — เจอข่าว P&G ติดป้าย NVDA
+    A lesson from real data: Yahoo shows "related news" on each ticker's page,
+    which **does not mean the story is about that stock**; a P&G story was tagged NVDA.
 
-    ถ้าปล่อยให้การผูกผิดเข้าคลัง งาน text alpha ที่สร้างบนคลังนี้จะเสียทั้งหมด
-    จึงแยกเป็น:
-      `tickers`      = ยืนยันได้ (ชื่อปรากฏในพาดหัวจริง)
-      `tickers_hint` = แหล่งบอกมา แต่ยังไม่ยืนยัน → ใช้เป็นคำใบ้เท่านั้น
+    Letting wrong links into the store would spoil any text-alpha work built on it,
+    so they are split:
+      `tickers`      = confirmed (the name really appears in the headline)
+      `tickers_hint` = suggested by the source but unconfirmed; a hint only
     """
     return {
         "url": url.strip(),
@@ -78,37 +77,37 @@ def normalize(
 
 
 def _boundary(term: str) -> str:
-    """regex ที่จับ `term` แบบเป็นคำเต็ม โดยนับเฉพาะอักษร ASCII เป็น "ตัวติดกัน"
+    """Regex that matches `term` as a whole word, counting only ASCII letters and digits as "attached".
 
-    ## ทำไมไม่ใช้ `\\b`
+    ## Why not `\\b`
 
-    `\\b` ของ Python นับอักษรจีน/ญี่ปุ่นเป็น word character ด้วย
-    พาดหัว "小心Amazon假平台..." จึงไม่มีขอบเขตคำรอบคำว่า Amazon → จับไม่ได้เลย
-    ซึ่งเป็นปัญหาใหญ่เพราะ GDELT ส่งข่าวหลายภาษามาให้เป็นปกติ
+    Python's `\\b` also counts Chinese and Japanese characters as word characters,
+    so the headline "小心Amazon假平台..." has no word boundary around Amazon and never matches,
+    which is a real problem because GDELT routinely sends news in many languages.
 
-    การนิยามขอบเขตด้วย `[A-Za-z0-9]` แทน แก้ทั้งสองด้านพร้อมกัน:
-      "Metal"          → Meta ตามด้วย 'l' ซึ่งเป็น ASCII → ไม่จับ ✅
-      "小心Amazon假"    → รอบข้างไม่ใช่ ASCII → จับได้ ✅
-      "Apple's"        → ตามด้วย ' ซึ่งไม่ใช่ ASCII alnum → จับได้ ✅
+    Defining the boundary as `[A-Za-z0-9]` fixes both sides at once:
+      "Metal"          -> Meta followed by 'l', which is ASCII: no match ✅
+      "小心Amazon假"    -> neighbours are not ASCII: match ✅
+      "Apple's"        -> followed by ', which is not ASCII alnum: match ✅
     """
     return rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])"
 
 
 @lru_cache(maxsize=1)
 def _ticker_patterns() -> list[tuple[re.Pattern[str], str]]:
-    """คอมไพล์ regex ครั้งเดียว — ฟังก์ชันนี้ถูกเรียกทุกบทความ (หลายร้อยชิ้น/วัน)
+    """Compile the regex once; this function runs for every article (hundreds a day).
 
-    เดิมใช้ `if ticker in title` (substring ล้วน) ซึ่งทำให้ META จับคำว่า "Metal"
-    และ "metals" — พบข่าว "This Overlooked Metals Stock..." ถูกติด META จริงในคลัง
-    ยิ่งเพิ่ม ticker สั้น ๆ ยิ่งพัง เพราะ CAT/KO/GE/LIN เป็นคำปกติทั้งหมด
+    It used to be `if ticker in title` (a plain substring), which made META match "Metal"
+    and "metals"; a story "This Overlooked Metals Stock..." really was tagged META in the store.
+    Short tickers make it worse, because CAT, KO, GE and LIN are all ordinary words.
     """
     patterns: list[tuple[re.Pattern[str], str]] = []
 
     for ticker in config.WATCHLIST:
-        # ตัวย่อที่เป็นคำปกติในภาษาอังกฤษ จับจากชื่อบริษัทอย่างเดียว
-        # ("CAT" ในข่าวอาจเป็นแมว, "KO" อาจเป็นน็อกเอาต์, "AMT" อาจเป็นภาษี)
-        # หมายเหตุ: แหล่งที่รู้ ticker แน่นอนอยู่แล้ว (เช่น SEC) ส่งมาทาง `existing`
-        # จึงไม่ได้รับผลจากข้อยกเว้นนี้
+        # Tickers that are ordinary English words are matched by company name only
+        # ("CAT" in a headline may be a cat, "KO" a knockout, "AMT" an amount)
+        # Note: sources that already know the ticker for sure (such as SEC) pass it in `existing`
+        # so this exception does not affect them
         if ticker in config.AMBIGUOUS_SYMBOLS:
             continue
         patterns.append((re.compile(_boundary(ticker), re.IGNORECASE), ticker))
@@ -120,10 +119,10 @@ def _ticker_patterns() -> list[tuple[re.Pattern[str], str]]:
 
 
 def tag_tickers(title: str, existing: list[str] | None = None) -> list[str]:
-    """หา ticker จากพาดหัว — ทำฝั่งเราเอง ไม่เปลืองโควตา API
+    """Find tickers in a headline, on our side, without spending API quota.
 
-    ใช้ทั้งชื่อย่อและชื่อบริษัท เพราะข่าวมักเขียน "Nvidia" ไม่ใช่ "NVDA"
-    ผลลัพธ์คือ `tickers` ที่ **ยืนยันแล้ว** ต่างจาก `tickers_hint` ที่แหล่งข่าวเดามาให้
+    Uses both tickers and company names, because stories usually say "Nvidia", not "NVDA".
+    The result is **confirmed** `tickers`, unlike the `tickers_hint` a news source guesses.
     """
     found = set(existing or [])
 
@@ -135,10 +134,10 @@ def tag_tickers(title: str, existing: list[str] | None = None) -> list[str]:
 
 
 def iso(value: Any) -> str:
-    """แปลงวันที่หลายรูปแบบให้เป็น ISO — คืนสตริงว่างถ้าแปลงไม่ได้
+    """Convert dates in several formats to ISO; returns an empty string if conversion fails.
 
-    แต่ละแหล่งส่งวันที่มาคนละแบบ (epoch, RFC822, GDELT compact, ISO)
-    การทำให้เป็นรูปแบบเดียวตรงนี้ทำให้ที่อื่นไม่ต้องรู้เรื่องนี้อีก
+    Each source sends dates differently (epoch, RFC822, GDELT compact, ISO);
+    normalising here means nothing else has to know about it.
     """
     if not value:
         return ""
@@ -160,13 +159,13 @@ def iso(value: Any) -> str:
         except ValueError:
             pass
 
-    # ISO อยู่แล้ว (อาจลงท้ายด้วย Z)
+    # Already ISO (may end in Z)
     try:
         return datetime.fromisoformat(text.replace("Z", "+00:00")).isoformat()
     except ValueError:
         pass
 
-    # RFC 822 จาก RSS
+    # RFC 822 from RSS
     try:
         from email.utils import parsedate_to_datetime
         return parsedate_to_datetime(text).isoformat()

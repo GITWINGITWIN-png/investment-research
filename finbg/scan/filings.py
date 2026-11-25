@@ -1,14 +1,14 @@
-"""SEC EDGAR ทั้งตลาด — แหล่งข้อมูลปฐมภูมิที่ฟรีและเป็นทางการที่สุด
+"""Whole-market SEC EDGAR: the most official free primary source.
 
-| อะไร | จากไหน | ทำไมมีค่า |
+| What | From where | Why it is valuable |
 |---|---|---|
-| ทุก filing ของวัน | daily-index/form.YYYYMMDD.idx (1 request) | ~3,400 ฉบับ/วัน |
-| หัวข้อ 8-K | ไฟล์ -index-headers.html (~5 KB/ฉบับ) | รู้ว่าเรื่องอะไรโดยไม่ต้องเปิดอ่าน |
-| Form 4 (คนในซื้อ/ขาย) | ไฟล์ .txt ของ filing (~20 KB) | **การซื้อในตลาดด้วยเงินตัวเอง** (code P) คือสัญญาณที่งานวิจัยยืนยัน — การรับหุ้นเป็นค่าตอบแทน (A/M/F) ไม่ใช่ |
-| 13D | ชื่อฟอร์มใน daily index | นักลงทุนเคลื่อนไหว (activist) ถือเกิน 5% |
-| เนื้อข่าว 8-K | EX-99.1 ในไฟล์ .txt | อ่านเฉพาะตัวที่ผ่านชั้น 1 (เปลือง bandwidth) |
+| every filing of the day | daily-index/form.YYYYMMDD.idx (1 request) | about 3,400 a day |
+| 8-K items | the -index-headers.html file (about 5 KB each) | the topic without opening the filing |
+| Form 4 (insider buys/sells) | the filing's .txt file (about 20 KB) | **open-market purchases with own money** (code P) are the signal research supports; shares received as pay (A/M/F) are not |
+| 13D | form name in the daily index | activist investors holding more than 5% |
+| 8-K text | EX-99.1 in the .txt file | read only for stocks that pass stage 1 (bandwidth) |
 
-ทุก request ส่ง User-Agent ที่มีอีเมลตามเงื่อนไขของ SEC และเว้นจังหวะ ≤ ~7 ครั้ง/วินาที (เพดาน 10)
+Every request sends a User-Agent with an email, as the SEC requires, paced at about 7 per second or less (the cap is 10).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ INDEX_URL = "https://www.sec.gov/Archives/edgar/daily-index/{year}/QTR{quarter}/
 ARCHIVE = "https://www.sec.gov/Archives/"
 LINE = re.compile(r"^(?P<form>\S.*?)\s{2,}(?P<company>.+?)\s{2,}(?P<cik>\d+)\s+(?P<filed>\d{8})\s+(?P<path>edgar/\S+)\s*$")
 
-# ชื่อหัวข้อ 8-K ตามแบบฟอร์มของ SEC → รหัส (ไฟล์ header ให้มาเป็นชื่อ ไม่ใช่รหัส)
+# 8-K item names as on the SEC form -> codes (the header file gives names, not codes)
 ITEM_NAMES = [
     ("entry into a material definitive agreement", "1.01"), ("termination of a material definitive", "1.02"),
     ("bankruptcy or receivership", "1.03"), ("mine safety", "1.04"), ("cybersecurity", "1.05"),
@@ -56,7 +56,7 @@ def _get(url: str, timeout: int = 30) -> requests.Response | None:
 
 
 def daily_index(day: date) -> pd.DataFrame:
-    """filing ทั้งหมดที่ยื่นในวันนั้น — วันหยุด/ยังไม่ออก คืนตารางว่าง"""
+    """Every filing made that day; a holiday or a day not yet published returns an empty table"""
     quarter = (day.month - 1) // 3 + 1
     response = _get(INDEX_URL.format(year=day.year, quarter=quarter, day=day.strftime("%Y%m%d")), timeout=60)
     if response is None:
@@ -98,7 +98,7 @@ def _tag(block: str, tag: str) -> str:
 
 
 def form4(path: str) -> dict[str, Any] | None:
-    """แยก Form 4 เป็นโครงสร้าง: ผู้ออกหุ้น, คนใน (ตำแหน่ง), รายการซื้อขายแต่ละรายการ"""
+    """Parse a Form 4 into structure: issuer, insider (role), and each transaction"""
     response = _get(ARCHIVE + path)
     if response is None:
         return None
@@ -131,7 +131,7 @@ def form4(path: str) -> dict[str, Any] | None:
             "direction": _tag(block, "transactionAcquiredDisposedCode"),
             "plan_10b5_1": "10b5-1" in block,
         })
-    # แผนซื้อขายล่วงหน้า (Rule 10b5-1) = ตั้งเวลาไว้ก่อน ไม่ได้สะท้อนการตัดสินใจ ณ ตอนนั้น
+    # Pre-planned trading (Rule 10b5-1) is scheduled in advance and does not reflect a decision at that moment
     planned = _tag(xml, "aff10b5One") in ("1", "true")
     for tx in transactions:
         tx["plan_10b5_1"] = tx["plan_10b5_1"] or planned
@@ -144,7 +144,7 @@ def form4(path: str) -> dict[str, Any] | None:
 
 
 def collect_day(day: date, universe_ciks: set[int], seen: set[str]) -> dict[str, Any]:
-    """ดึง index ของวันนั้น + รายละเอียด 8-K/Form 4 ของบริษัทใน universe (ข้ามฉบับที่เคยดึงแล้ว)"""
+    """Fetch that day's index + 8-K/Form 4 details for universe companies (skipping filings already fetched)"""
     index = daily_index(day)
     if index.empty:
         return {"filings": 0, "events": [], "insider": []}
@@ -167,9 +167,9 @@ def collect_day(day: date, universe_ciks: set[int], seen: set[str]) -> dict[str,
         elif form == "4":
             parsed = form4(row.path)
             if parsed:
-                # Form 4 ที่ยื่นร่วมกันหลายนิติบุคคล (กองทุน + บริษัทแม่ + ผู้จัดการ) รายงาน "ธุรกรรมเดียวกัน"
-                # → 1 แถวต่อ 1 ธุรกรรม รวมชื่อผู้ยื่นไว้ด้วยกัน (เดิมแยกแถวต่อคน ทำให้ยอดซื้อเกินจริงหลายเท่า
-                #   — Claude จับได้เองในรอบแรก 2026-10-25: DOLE ขึ้นซ้ำ 5 บรรทัด)
+                # A Form 4 filed jointly by several entities (fund + parent + manager) reports "the same transaction"
+                # -> one row per transaction with the filer names combined (it used to be one row per filer, inflating purchase totals several times
+                # as Claude itself noticed in the first round, 2026-10-25: DOLE appeared 5 times)
                 owners = parsed["owners"] or [{}]
                 for tx in parsed["transactions"]:
                     insider_rows.append({
@@ -195,7 +195,7 @@ EVENTS = config.RAW / "sec_events"
 
 
 def seen_accessions() -> set[str]:
-    """accession ที่เคยแยกรายละเอียดไปแล้ว (8-K/13D/Form 4) — ไม่ต้องดึงซ้ำ"""
+    """Accessions already parsed (8-K/13D/Form 4), so they are not fetched again"""
     seen: set[str] = set()
     for path in EVENTS.glob("*.jsonl"):
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -230,7 +230,7 @@ def insider_history(since: date) -> pd.DataFrame:
     if "ten_percent" not in df.columns:
         df["ten_percent"] = False
     df["ten_percent"] = df["ten_percent"].fillna(False).astype(bool)
-    # กันซ้ำอีกชั้นตอนอ่าน: ธุรกรรมเดียวกันในเอกสารเดียวกัน = 1 รายการ ไม่ว่าเก็บมากี่แถว
+    # A second dedup on read: the same transaction in the same document = one entry, however many rows were stored
     keys = ["accession", "code", "date", "shares", "price", "direction"]
     return (df.groupby(keys, as_index=False)
               .agg(filed=("filed", "first"), issuer_cik=("issuer_cik", "first"), ticker=("ticker", "first"),
@@ -240,9 +240,9 @@ def insider_history(since: date) -> pd.DataFrame:
 
 
 def document_text(path: str, max_chars: int = 6000) -> str:
-    """เนื้อหาข่าวประชาสัมพันธ์ที่แนบมากับ 8-K (EX-99.1) — ถ้าไม่มี ใช้ตัว 8-K เอง
+    """The press release attached to an 8-K (EX-99.1); if there is none, the 8-K itself.
 
-    ตัด HTML/ตารางออกให้เหลือข้อความ เพราะทุกตัวอักษรคือ token
+    HTML and tables are stripped down to text, because every character is a token.
     """
     response = _get(ARCHIVE + path, timeout=60)
     if response is None:

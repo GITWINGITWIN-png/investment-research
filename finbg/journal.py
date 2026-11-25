@@ -1,11 +1,11 @@
-"""สร้างและติดตาม prediction / hypothesis (BG-1 และ BG-4)
+"""Create and track predictions and hypotheses (BG-1 and BG-4).
 
-ทำไมต้องมีคำสั่งสร้างไฟล์ให้ แทนที่จะพิมพ์เอง:
-**แรงเสียดทานเป็นศัตรูของนิสัย** ถ้าต้องนึกโครงสร้าง frontmatter เองทุกครั้ง
-สุดท้ายจะเลิกเขียนภายในเดือนแรก — และ BG-1 คือส่วนที่มีค่าที่สุดของทั้งระบบ
+Why a command creates the files instead of writing them by hand:
+**friction kills habits.** Having to remember the frontmatter structure every time
+ends the habit within the first month, and BG-1 is the most valuable part of the whole system.
 
-ฟิลด์ `falsifier` ในเทมเพลตสำคัญที่สุด: ถ้าเขียนไม่ได้ว่าอะไรจะพิสูจน์ว่าเราผิด
-แสดงว่าสิ่งที่เขียนไม่ใช่คำทำนาย แต่เป็นความรู้สึก
+The `falsifier` field in the template matters most: if you cannot write what would prove you wrong,
+what you wrote is a feeling, not a prediction.
 """
 
 from __future__ import annotations
@@ -18,14 +18,14 @@ from . import config, storage
 
 
 def _slugify(text: str) -> str:
-    """แปลงหัวข้อเป็นชื่อไฟล์ที่ปลอดภัย รองรับภาษาไทย"""
+    """Turn a topic into a safe file name; Thai is supported"""
     slug = re.sub(r"[^\w฀-๿\s-]", "", text, flags=re.UNICODE)
     slug = re.sub(r"[\s_]+", "-", slug.strip())
     return slug[:60] or "untitled"
 
 
 def new_prediction(title: str, horizon_days: int = 90, confidence: int = 50) -> dict[str, Any]:
-    """สร้างไฟล์คำทำนายใหม่พร้อม frontmatter ที่พร้อมให้ระบบอ่านได้"""
+    """Create a new prediction file with frontmatter the system can read"""
     storage.ensure_dirs()
 
     today = storage.utc_now().date()
@@ -78,10 +78,10 @@ tags: [prediction]
 
 
 def new_hypothesis(title: str, cost: str = "medium") -> dict[str, Any]:
-    """สร้าง hypothesis card ใหม่ — เขียนเก็บไว้ก่อน ยังไม่ต้องทดสอบ
+    """Create a new hypothesis card: write it down now, test it later.
 
-    เจตนาคือแยก "การมีไอเดีย" (ฟรี ทำได้ตลอดเวลา) ออกจาก
-    "การทดสอบไอเดีย" (แพง ทำเดือนละครั้ง) → ใช้ token ได้คุ้มกว่ามาก
+    The point is to separate "having an idea" (free, any time) from
+    "testing an idea" (expensive, once a month), which makes much better use of tokens.
     """
     storage.ensure_dirs()
 
@@ -120,7 +120,7 @@ tags: [hypothesis]
 
 
 def due_predictions() -> list[dict[str, str]]:
-    """คำทำนายที่ครบกำหนดแล้วแต่ยังไม่ได้บันทึกผล — brief จะเตือนให้ไปเคลียร์"""
+    """Predictions that are due but have no recorded outcome; the brief reminds us to settle them"""
     today = str(storage.utc_now().date())
     due: list[dict[str, str]] = []
 

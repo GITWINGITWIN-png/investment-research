@@ -1,20 +1,20 @@
-"""ข่าวหุ้นไทยจาก RSS ของสื่อ — ดึงวันละครั้ง แล้วย้อนหน้า feed จนครบ 30 ชั่วโมง
+"""Thai stock news from media RSS: fetched once a day, paging back through each feed until 30 hours are covered.
 
-## ทำไมต้องย้อนหน้า feed
+## Why page back through the feed
 
-RSS ส่งแค่ 10–30 ข่าวล่าสุดต่อหน้า แต่สื่อหุ้นไทยออกข่าววันละหลายร้อยชิ้น
-(ข่าวหุ้นออก ~10 ชิ้น/ชั่วโมงในวันทำการ) — ดึงวันละครั้งแค่หน้าแรกจะได้ไม่ถึง 10%
-ทางแก้ที่ง่ายคือดึงทุกชั่วโมง แต่ผู้ใช้ไม่เอางานรายชั่วโมง · feed ของ WordPress รองรับ ?paged=N
-จึงดึงวันละครั้งแล้วย้อนหน้าไปจนเจอข่าวเก่ากว่า 30 ชม. ได้ข่าวครบเท่ากัน
-(ซ้อนกับรอบก่อน ~6 ชม. เผื่อเครื่องเปิดไม่ตรงเวลา — ข่าวซ้ำข้ามไฟล์ตัดที่ฝั่งผู้อ่าน ตามหลักของคลัง)
+RSS returns only the latest 10 to 30 items per page, but Thai stock media publish hundreds of items a day
+(Kaohoon publishes about 10 an hour on trading days), so fetching only the first page once a day would get under 10%.
+The simple fix would be hourly fetching, but the owner did not want hourly jobs; WordPress feeds support ?paged=N,
+so we fetch once a day and page back until items older than 30 hours appear, which gives the same coverage
+(overlapping the previous round by about 6 hours in case the machine starts late; duplicates across files are removed by the reader, as the store requires).
 
-## ติดป้าย ticker จากพาดหัว
+## Tagging tickers from headlines
 
-สื่อหุ้นไทยเขียนชื่อย่อหุ้นเป็นอักษรอังกฤษตัวพิมพ์ใหญ่ปนในประโยคไทย ("ADVANC กำไรโต...")
-- ใช้ `_boundary` ตัวเดียวกับฝั่ง US — อักษรไทยนับเป็นขอบคำ จึงจับชื่อย่อที่ติดกับคำไทยได้
-- **ตรงตัวพิมพ์ใหญ่** (ต่างจากฝั่ง US) — "true" ในประโยคอังกฤษไม่ใช่หุ้น TRUE
-- ชื่อย่อที่เป็นคำทั่วไปด้วย (AI, CPI, META...) เก็บเป็น `tickers_hint` แทน `tickers`
-  แบบเดียวกับฝั่ง US: `tickers` = ยืนยันแล้ว · `tickers_hint` = อาจใช่ ต้องยืนยันก่อนใช้ — ดู config.TH_AMBIGUOUS_SYMBOLS
+Thai stock media write tickers in uppercase Latin letters inside Thai sentences ("ADVANC กำไรโต...").
+- Uses the same `_boundary` as the US side: Thai letters count as word boundaries, so tickers attached to Thai words match
+- **Case-sensitive** (unlike the US side): "true" in an English sentence is not the stock TRUE
+- Tickers that are also common words (AI, CPI, META...) go into `tickers_hint` instead of `tickers`,
+  as on the US side: `tickers` = confirmed, `tickers_hint` = maybe, to be confirmed before use; see config.TH_AMBIGUOUS_SYMBOLS
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from .. import config, storage
 from ..collect.sources import _boundary, iso, normalize
 
 
-Patterns = list[tuple[re.Pattern[str], str, bool]]      # (regex, symbol, ยืนยันได้ไหม)
+Patterns = list[tuple[re.Pattern[str], str, bool]]      # (regex, symbol, whether it is confirmable)
 
 
 def ticker_patterns(symbols: list[str]) -> Patterns:
@@ -36,13 +36,13 @@ def ticker_patterns(symbols: list[str]) -> Patterns:
     for symbol in symbols:
         base = symbol.removesuffix(".BK")
         if len(base) < 2:
-            continue                                     # ชื่อย่อตัวเดียว (เช่น M) จับผิดแทบทุกพาดหัว
+            continue                                     # One-letter tickers (such as M) match wrongly in almost every headline
         patterns.append((re.compile(_boundary(base)), symbol, base not in config.TH_AMBIGUOUS_SYMBOLS))
     return patterns
 
 
 def tag(title: str, patterns: Patterns) -> tuple[list[str], list[str]]:
-    """คืน (tickers ที่ยืนยันแล้ว, tickers_hint ที่อาจใช่)"""
+    """Return (confirmed tickers, possible tickers_hint)"""
     confirmed, hints = set(), set()
     for pattern, symbol, sure in patterns:
         if pattern.search(title):
@@ -59,16 +59,16 @@ def _parse_time(value: str) -> datetime | None:
 
 def fetch_feed(feed: dict[str, str], cutoff: datetime, patterns: Patterns,
                max_pages: int = config.TH_NEWS_MAX_PAGES) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """ย้อนหน้า feed จนข่าวเก่าสุดของหน้าเก่ากว่า cutoff — คืน (ข่าว, สถิติของ feed นี้)"""
+    """Page back through a feed until the oldest item on a page is older than the cutoff; returns (items, statistics for this feed)"""
     import feedparser
 
-    found: dict[str, dict[str, Any]] = {}                 # key = URL · หน้าเลื่อนได้ถ้ามีข่าวใหม่ระหว่างดึง
+    found: dict[str, dict[str, Any]] = {}                 # key = URL; pages can shift if new items arrive during the fetch
     pages, reached = 0, False
     for page in range(1, max_pages + 1):
         url = feed["url"] if page == 1 else f"{feed['url']}?paged={page}"
         try:
             parsed = feedparser.parse(url, agent=config.USER_AGENT)
-        except Exception as exc:                          # noqa: BLE001 — feed หนึ่งพังต้องไม่กระทบ feed อื่น
+        except Exception as exc:                          # noqa: BLE001 (one broken feed must not affect the others)
             print(f"  ⚠️  th-rss/{feed['name']} หน้า {page}: {type(exc).__name__}")
             break
         entries = getattr(parsed, "entries", [])
@@ -101,10 +101,10 @@ def fetch_feed(feed: dict[str, str], cutoff: datetime, patterns: Patterns,
 
 
 def collect(symbols: list[str], hours: int | None = None) -> dict[str, Any]:
-    """ทุก feed → 1 ไฟล์ JSONL ต่อการรัน (ข้อมูลดิบตามที่เห็น ณ เวลานั้น)
+    """Every feed -> one JSONL file per run (raw data as seen at that time).
 
-    `hours` ย้อนนานกว่าปกติได้ (ใช้ครั้งเดียวตอนเริ่ม เพื่อวัดความครอบคลุมโดยไม่ต้องรอข่าวสะสม 2 สัปดาห์)
-    ข่าวที่ย้อนเก็บมีเวลาเผยแพร่จริงติดมา — ใช้วัดความครอบคลุมได้ แต่ scanner ใช้เฉพาะข่าวในหน้าต่างของแต่ละรอบ
+    `hours` can reach further back than usual (once, at the start, to measure coverage without waiting two weeks for news to accumulate).
+    Backfilled items carry their real publication time, so they can measure coverage, but the scanner uses only news inside each round's window.
     """
     lookback = hours or config.TH_NEWS_LOOKBACK_HOURS
     cutoff = storage.utc_now() - timedelta(hours=lookback)
